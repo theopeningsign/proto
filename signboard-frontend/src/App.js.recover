@@ -1,0 +1,204 @@
+import React, { useState } from 'react';
+import { motion } from 'framer-motion';
+import ImageUploader from './components/ImageUploader';
+import SignboardForm from './components/SignboardForm';
+import ResultViewer from './components/ResultViewer';
+
+function App() {
+  const [buildingImage, setBuildingImage] = useState(null);
+  const [selectedArea, setSelectedArea] = useState(null);
+  const [formData, setFormData] = useState({
+    signboardInputType: 'text', // 'text' or 'image'
+    text: '',
+    logo: null,
+    logoType: 'channel',
+    signboardImage: null, // 간판 이미지 (이미지 방식)
+    installationType: '맨벽',
+    signType: '전광채널',
+    bgColor: '#6B2D8F',
+    textColor: '#FFFFFF',
+    textDirection: 'horizontal',
+    fontSize: 100,
+    textPositionX: 50,
+    textPositionY: 50
+  });
+  const [lights, setLights] = useState([]);
+  const [lightsEnabled, setLightsEnabled] = useState(true);
+  const [results, setResults] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const handleGenerate = async () => {
+    if (!buildingImage || !selectedArea) {
+      alert('건물 사진을 업로드하고 간판 영역을 선택해주세요.');
+      return;
+    }
+
+    if (formData.signboardInputType === 'text' && !formData.text.trim()) {
+      alert('상호명을 입력해주세요.');
+      return;
+    }
+
+    if (formData.signboardInputType === 'image' && !formData.signboardImage) {
+      alert('간판 이미지를 업로드해주세요.');
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      // 이미지를 base64로 변환
+      const buildingBase64 = await imageToBase64(buildingImage);
+      let logoBase64 = '';
+      let signboardImageBase64 = '';
+      
+      if (formData.logo) {
+        logoBase64 = await imageToBase64(formData.logo);
+      }
+
+      if (formData.signboardImage) {
+        signboardImageBase64 = await imageToBase64(formData.signboardImage);
+      }
+
+      // 선택된 영역을 점 배열로 변환
+      let points;
+      if (selectedArea.type === 'polygon') {
+        // 폴리곤: 점 배열 그대로 사용
+        points = selectedArea.points.map(p => [p.x, p.y]);
+      } else {
+        // 사각형 (하위 호환성)
+        points = [
+          [selectedArea.x, selectedArea.y],
+          [selectedArea.x + selectedArea.width, selectedArea.y],
+          [selectedArea.x + selectedArea.width, selectedArea.y + selectedArea.height],
+          [selectedArea.x, selectedArea.y + selectedArea.height]
+        ];
+      }
+
+      // API 호출
+      const formDataToSend = new FormData();
+      formDataToSend.append('building_photo', buildingBase64);
+      formDataToSend.append('polygon_points', JSON.stringify(points));
+      formDataToSend.append('signboard_input_type', formData.signboardInputType);
+      formDataToSend.append('text', formData.text || '');
+      formDataToSend.append('logo', logoBase64);
+      formDataToSend.append('signboard_image', signboardImageBase64);
+      formDataToSend.append('installation_type', formData.installationType || '맨벽');
+      formDataToSend.append('sign_type', formData.signType);
+      formDataToSend.append('bg_color', formData.bgColor);
+      formDataToSend.append('text_color', formData.textColor);
+      formDataToSend.append('text_direction', formData.textDirection || 'horizontal');
+      formDataToSend.append('font_size', formData.fontSize || 100);
+      formDataToSend.append('text_position_x', formData.textPositionX || 50);
+      formDataToSend.append('text_position_y', formData.textPositionY || 50);
+      formDataToSend.append('logo_type', formData.logoType || 'channel');
+      formDataToSend.append('lights', JSON.stringify(lights || []));
+      formDataToSend.append('lights_enabled', lightsEnabled ? 'true' : 'false');
+
+      const response = await fetch('http://localhost:8000/api/generate-simulation', {
+        method: 'POST',
+        body: formDataToSend
+      });
+
+      const data = await response.json();
+      
+      if (data.error) {
+        throw new Error(data.error);
+      }
+
+      setResults(data);
+    } catch (error) {
+      console.error('Error:', error);
+      alert('시뮬레이션 생성 중 오류가 발생했습니다: ' + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const imageToBase64 = (file) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-black">
+      <div className="max-w-7xl mx-auto px-4 py-12">
+        {/* 헤더 */}
+        <motion.header
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5 }}
+          className="text-center mb-12"
+        >
+          <h1 className="text-5xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-600 mb-4">
+            간판 시안 생성기
+          </h1>
+          <p className="text-gray-400 text-lg">AI로 간판을 실제 건물에 합성해보세요</p>
+        </motion.header>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {/* 왼쪽: 입력 섹션 */}
+          <motion.div
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.5, delay: 0.2 }}
+            className="space-y-6"
+          >
+            <ImageUploader
+              image={buildingImage}
+              onImageUpload={setBuildingImage}
+              selectedArea={selectedArea}
+              onAreaChange={setSelectedArea}
+            />
+            
+            <SignboardForm
+              formData={formData}
+              onFormDataChange={setFormData}
+            />
+
+            <motion.button
+              onClick={handleGenerate}
+              disabled={loading}
+              whileHover={{ scale: loading ? 1 : 1.02 }}
+              whileTap={{ scale: loading ? 1 : 0.98 }}
+              className="w-full bg-gradient-to-r from-blue-500 to-purple-600 rounded-lg px-8 py-4 text-white font-semibold shadow-lg disabled:from-gray-600 disabled:to-gray-700 disabled:cursor-not-allowed transition-all"
+            >
+              {loading ? (
+                <span className="flex items-center justify-center">
+                  <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  생성 중...
+                </span>
+              ) : (
+                '시안 생성하기'
+              )}
+            </motion.button>
+          </motion.div>
+
+          {/* 오른쪽: 결과 섹션 */}
+          <motion.div
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.5, delay: 0.3 }}
+          >
+            <ResultViewer
+              results={results}
+              loading={loading}
+              lights={lights}
+              onLightsChange={setLights}
+              lightsEnabled={lightsEnabled}
+              onToggleEnabled={setLightsEnabled}
+            />
+          </motion.div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default App;
