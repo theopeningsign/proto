@@ -68,46 +68,75 @@ const SignboardTransform = ({
           
           // 원본 fontSize 저장 (formData에서 가져오거나, 없으면 현재 fontSize 사용)
           const originalFontSize = storedOriginalFontSize;
+
+          // 현재 fontSize가 원본 fontSize에서 얼마나 달라졌는지 비율 계산
+          // 예) originalFontSize=100, currentFontSize=80 이면 ratio=0.8 → 박스도 0.8배
+          const fontSizeRatio = originalFontSize !== 0 ? (currentFontSize / originalFontSize) : 1;
+          
+          // 박스 크기를 간판 영역(baseWidth/Height)에 fontSize 비율을 곱해서 설정
+          const adjustedBaseWidth = baseWidth * fontSizeRatio;
+          const adjustedBaseHeight = baseHeight * fontSizeRatio;
           
           initialTransforms[signboard.id] = {
             x: (centerX / imageSize.width) * 100,
             y: (centerY / imageSize.height) * 100,
-            width: (baseWidth / imageSize.width) * 100,
-            height: (baseHeight / imageSize.height) * 100,
+            width: (adjustedBaseWidth / imageSize.width) * 100,
+            height: (adjustedBaseHeight / imageSize.height) * 100,
             rotation: 0,
             scale: 1,
             fontSize: currentFontSize,
-            originalFontSize: originalFontSize, // 원본 fontSize 저장
-            originalWidth: baseWidth,
-            originalHeight: baseHeight
+            originalFontSize: originalFontSize, // 원본 fontSize 저장 (기준값)
+            originalWidth: baseWidth,           // 기준이 되는 원래 간판 영역 너비
+            originalHeight: baseHeight          // 기준이 되는 원래 간판 영역 높이
           };
           prevFontSizesRef.current[signboard.id] = currentFontSize;
           hasChanges = true;
         } else {
           // existingTransform이 있고, 간판 편집을 다시 열었을 때
-          // storedOriginalFontSize (formData에서 가져온 원본) 대비 현재 fontSize의 비율로 박스 크기 재계산
-          if (Math.abs(storedOriginalFontSize - currentFontSize) > 0.1) {
-            const fontSizeRatio = currentFontSize / storedOriginalFontSize;
+          // 사용자가 직접 조절한 박스 크기를 보존해야 함
+          
+          // fontSize가 변경되었을 때만 박스 크기를 재계산
+          // (prevFontSize와 비교하여 실제로 변경되었는지 확인)
+          if (prevFontSize && Math.abs(prevFontSize - currentFontSize) > 0.1) {
+            // prevFontSize가 있고, fontSize가 변경되었을 때만 재계산
+            const fontSizeRatio = currentFontSize / prevFontSize;
             
-            // 원본 박스 크기 (originalWidth, originalHeight 기준)에 비율 적용
-            const baseWidth = existingTransform.originalWidth || (existingTransform.width * imageSize.width / 100);
-            const baseHeight = existingTransform.originalHeight || (existingTransform.height * imageSize.height / 100);
-            
-            const adjustedWidth = (baseWidth * fontSizeRatio / imageSize.width) * 100;
-            const adjustedHeight = (baseHeight * fontSizeRatio / imageSize.height) * 100;
+            // 기존 박스 크기에 비율 적용 (사용자가 조절한 크기를 기준으로)
+            const adjustedWidth = existingTransform.width * fontSizeRatio;
+            const adjustedHeight = existingTransform.height * fontSizeRatio;
             
             initialTransforms[signboard.id] = {
               ...existingTransform,
               width: adjustedWidth,
               height: adjustedHeight,
-              fontSize: currentFontSize,
-              originalFontSize: storedOriginalFontSize // formData의 originalFontSize 유지
+              fontSize: currentFontSize
             };
             prevFontSizesRef.current[signboard.id] = currentFontSize;
             hasChanges = true;
-          } else if (!prevFontSize) {
-            // transform은 있지만 prevFontSize가 없는 경우 (첫 렌더링)
-            prevFontSizesRef.current[signboard.id] = currentFontSize;
+          } else {
+            // fontSize가 변경되지 않았거나, prevFontSize가 없는 경우
+            // 사용자가 조절한 박스 크기를 그대로 유지 (width/height는 건드리지 않음)
+            
+            // originalWidth/Height가 없으면 설정만 하고, width/height는 유지
+            if (!existingTransform.originalWidth || !existingTransform.originalHeight) {
+              const baseWidth = existingTransform.width * imageSize.width / 100;
+              const baseHeight = existingTransform.height * imageSize.height / 100;
+              initialTransforms[signboard.id] = {
+                ...existingTransform, // 기존 width/height 그대로 유지
+                originalWidth: baseWidth,
+                originalHeight: baseHeight,
+                originalFontSize: storedOriginalFontSize
+              };
+              hasChanges = true;
+            } else {
+              // originalWidth/Height가 이미 있으면 아무것도 하지 않음
+              // 사용자가 조절한 박스 크기를 그대로 유지
+            }
+            
+            if (!prevFontSize) {
+              // transform은 있지만 prevFontSize가 없는 경우 (첫 렌더링)
+              prevFontSizesRef.current[signboard.id] = currentFontSize;
+            }
           }
         }
       }
@@ -163,7 +192,11 @@ const SignboardTransform = ({
     if (dragMode === 'move') {
       updateTransform(selectedId, {
         x: transform.x + dx,
-        y: transform.y + dy
+        y: transform.y + dy,
+        // originalWidth/Height와 originalFontSize는 유지 (기준값)
+        originalWidth: transform.originalWidth,
+        originalHeight: transform.originalHeight,
+        originalFontSize: transform.originalFontSize
       });
     } else if (dragMode === 'resize-se') {
       // 오른쪽 아래 모서리 - 퍼센트로 계산
@@ -184,7 +217,11 @@ const SignboardTransform = ({
         height: newHeight,
         x: transform.x + dx / 2,
         y: transform.y + dy / 2,
-        fontSize: newFontSize // fontSize도 함께 업데이트
+        fontSize: newFontSize, // fontSize도 함께 업데이트
+        // originalWidth/Height와 originalFontSize는 유지 (기준값)
+        originalWidth: transform.originalWidth,
+        originalHeight: transform.originalHeight,
+        originalFontSize: transform.originalFontSize
       });
     } else if (dragMode === 'rotate') {
       // 회전
@@ -192,7 +229,11 @@ const SignboardTransform = ({
       const centerY = transform.y;
       const angle = Math.atan2(y - centerY, x - centerX) * (180 / Math.PI);
       updateTransform(selectedId, {
-        rotation: angle
+        rotation: angle,
+        // originalWidth/Height와 originalFontSize는 유지 (기준값)
+        originalWidth: transform.originalWidth,
+        originalHeight: transform.originalHeight,
+        originalFontSize: transform.originalFontSize
       });
     }
   };
