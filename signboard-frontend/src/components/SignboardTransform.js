@@ -4,6 +4,8 @@ const SignboardTransform = ({
   signboards = [], 
   originalSignboards = [],
   imageSize = { width: 1, height: 1 },
+  selectedArea = null,
+  textSizeInfo = null,
   onTransformChange,
   onApply,
   onSelectSignboard
@@ -190,9 +192,60 @@ const SignboardTransform = ({
     const transform = dragStart.transform;
 
     if (dragMode === 'move') {
+      // 박스 이동: 박스 중심을 기준으로 텍스트 위치(textPositionX/Y) 재계산
+      const newX = transform.x + dx;
+      const newY = transform.y + dy;
+
+      // 이미지 좌표계에서 박스 중심 (px)
+      const boxCenterX = (newX / 100) * imageSize.width;
+      const boxCenterY = (newY / 100) * imageSize.height;
+
+      // 간판 영역(노란 박스) 계산 (px)
+      let signboardX = 0;
+      let signboardY = 0;
+      let signboardWidth = imageSize.width;
+      let signboardHeight = imageSize.height;
+
+      if (selectedArea) {
+        if (selectedArea.type === 'polygon' && selectedArea.points.length >= 4) {
+          const xs = selectedArea.points.map(p => p.x);
+          const ys = selectedArea.points.map(p => p.y);
+          signboardX = Math.min(...xs);
+          signboardY = Math.min(...ys);
+          signboardWidth = Math.max(...xs) - signboardX;
+          signboardHeight = Math.max(...ys) - signboardY;
+        } else if (selectedArea.x !== undefined) {
+          signboardX = selectedArea.x;
+          signboardY = selectedArea.y;
+          signboardWidth = selectedArea.width;
+          signboardHeight = selectedArea.height;
+        }
+      }
+
+      // 간판 영역 내에서의 텍스트 중심 위치 (px)
+      const textCenterX = boxCenterX - signboardX;
+      const textCenterY = boxCenterY - signboardY;
+
+      // 간판 영역 내에서 0~100% 기준의 textPositionX/Y 계산
+      // ※ 실제 텍스트 크기를 정확히 아는 경우에도, 사용자가 느끼기에
+      //   "박스 중심이 간판 안에서 어디쯤이냐"가 더 직관적이어서
+      //   텍스트 크기를 빼지 않고 단순 비율로 계산한다.
+      let textPositionX = (signboardWidth > 0)
+        ? (textCenterX / signboardWidth) * 100
+        : 50;
+      let textPositionY = (signboardHeight > 0)
+        ? (textCenterY / signboardHeight) * 100
+        : 50;
+
+      // 0~100% 범위로 클램프
+      textPositionX = Math.max(0, Math.min(100, textPositionX));
+      textPositionY = Math.max(0, Math.min(100, textPositionY));
+
       updateTransform(selectedId, {
-        x: transform.x + dx,
-        y: transform.y + dy,
+        x: newX,
+        y: newY,
+        textPositionX,
+        textPositionY,
         // originalWidth/Height와 originalFontSize는 유지 (기준값)
         originalWidth: transform.originalWidth,
         originalHeight: transform.originalHeight,

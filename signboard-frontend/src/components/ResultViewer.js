@@ -6,14 +6,10 @@ const ResultViewer = ({ results, loading, lights = [], onLightsChange = () => {}
   const [viewMode, setViewMode] = useState('day'); // 'day' | 'night'
   const [selectedLightId, setSelectedLightId] = useState(null);
   const [showTransform, setShowTransform] = useState(false);
-  const [showTextEdit, setShowTextEdit] = useState(false);
-  const [textPositions, setTextPositions] = useState({});
-  const [draggingTextId, setDraggingTextId] = useState(null);
   const [imageSize, setImageSize] = useState({ width: 1, height: 1 });
   const containerRef = useRef(null);
   const draggingRef = useRef(null);
   const originalSignboardsRef = useRef(originalSignboards);
-  const draggingTextIdRef = useRef(null); // 드래그 중인 ID를 ref로도 저장
   const imageRef = useRef(null);
   const scaleRef = useRef(1);
   const offsetRef = useRef({ x: 0, y: 0 });
@@ -191,266 +187,6 @@ const ResultViewer = ({ results, loading, lights = [], onLightsChange = () => {}
     };
   }, [scale, offset, results, handleWheel]);
 
-  // 텍스트 드래그 핸들러 (줌/팬 고려, 간판 영역 내 위치로 변환)
-  const handleTextMouseDown = (e, id) => {
-    console.log('[상호 편집] handleTextMouseDown 호출됨', id);
-    if (!containerRef.current || !imageRef.current || !selectedArea) {
-      console.log('[상호 편집] 필수 요소 없음', { containerRef: !!containerRef.current, imageRef: !!imageRef.current, selectedArea: !!selectedArea });
-      return;
-    }
-    e.stopPropagation();
-    e.preventDefault();
-    
-    // 간판 영역 계산
-    let signboardX, signboardY, signboardWidth, signboardHeight;
-    if (selectedArea.type === 'polygon' && selectedArea.points.length >= 4) {
-      const xs = selectedArea.points.map(p => p.x);
-      const ys = selectedArea.points.map(p => p.y);
-      signboardX = Math.min(...xs);
-      signboardY = Math.min(...ys);
-      signboardWidth = Math.max(...xs) - signboardX;
-      signboardHeight = Math.max(...ys) - signboardY;
-    } else {
-      signboardX = selectedArea.x;
-      signboardY = selectedArea.y;
-      signboardWidth = selectedArea.width;
-      signboardHeight = selectedArea.height;
-    }
-    
-    // 마우스 위치를 이미지 좌표로 변환 (줌/팬 고려)
-    const containerRect = containerRef.current.getBoundingClientRect();
-    const mouseX = e.clientX - containerRect.left;
-    const mouseY = e.clientY - containerRect.top;
-    
-    // 줌/팬이 적용된 이미지 내에서의 실제 좌표
-    const imageX = (mouseX - offset.x) / scale;
-    const imageY = (mouseY - offset.y) / scale;
-    
-    // 마우스 위치는 텍스트 중심 위치로 간주
-    // 간판 내에서의 텍스트 중심 위치
-    const textCenterX = imageX - signboardX;
-    const textCenterY = imageY - signboardY;
-    
-    // 현재 간판의 텍스트 크기 추정 (fontSize 기반) - ref 사용
-    const sb = (originalSignboardsRef.current || []).find(s => s.id === id);
-    const currentFontSize = sb?.formData?.fontSize || 100;
-    const baseRatio = Math.sqrt(currentFontSize / 100);
-    const estimatedTextWidth = signboardWidth * 0.5 * baseRatio;
-    const estimatedTextHeight = signboardHeight * 0.4 * baseRatio;
-    
-    // 백엔드와 동일한 방식으로 text_position_x/y 계산
-    // text_center_x = text_width/2 + (width - text_width) * (text_position_x / 100)
-    // 따라서: text_position_x = ((text_center_x - text_width/2) / (width - text_width)) * 100
-    const availableWidth = signboardWidth - estimatedTextWidth;
-    const availableHeight = signboardHeight - estimatedTextHeight;
-    
-    const xInSignboard = availableWidth > 0 
-      ? ((textCenterX - estimatedTextWidth / 2) / availableWidth) * 100 
-      : 50;
-    const yInSignboard = availableHeight > 0 
-      ? ((textCenterY - estimatedTextHeight / 2) / availableHeight) * 100 
-      : 50;
-    
-    console.log('[상호 편집] 드래그 시작, 위치:', { xInSignboard, yInSignboard });
-    
-    // ref에 즉시 저장 (상태 업데이트 전에)
-    draggingTextIdRef.current = id;
-    setDraggingTextId(id);
-    
-    // 초기 위치 설정
-    setTextPositions((prev) => {
-      const newPos = {
-        ...prev,
-        [id]: { 
-          ...(prev[id] || {}), 
-          x: Math.max(0, Math.min(100, xInSignboard)), 
-          y: Math.max(0, Math.min(100, yInSignboard)) 
-        },
-      };
-      console.log('[상호 편집] textPositions 업데이트:', newPos);
-      return newPos;
-    });
-    
-    // 이벤트 리스너 직접 등록 (상태 업데이트를 기다리지 않음)
-    const handleMove = (e) => {
-      // draggingTextIdRef.current가 0일 수 있으므로 null/undefined만 체크
-      if (draggingTextIdRef.current === null || draggingTextIdRef.current === undefined || !containerRef.current || !imageRef.current || !selectedAreaRef.current) {
-        console.log('[상호 편집] handleMove 조건 실패', {
-          draggingTextId: draggingTextIdRef.current,
-          containerRef: !!containerRef.current,
-          imageRef: !!imageRef.current,
-          selectedArea: !!selectedAreaRef.current
-        });
-        return;
-      }
-      const currentId = draggingTextIdRef.current;
-      const currentSelectedArea = selectedAreaRef.current;
-      const currentScale = scaleRef.current;
-      const currentOffset = offsetRef.current;
-      
-      console.log('[상호 편집] handleTextMouseMove 호출됨 (직접 등록)', currentId);
-      
-      // 간판 영역 계산
-      let signboardX, signboardY, signboardWidth, signboardHeight;
-      if (currentSelectedArea.type === 'polygon' && currentSelectedArea.points.length >= 4) {
-        const xs = currentSelectedArea.points.map(p => p.x);
-        const ys = currentSelectedArea.points.map(p => p.y);
-        signboardX = Math.min(...xs);
-        signboardY = Math.min(...ys);
-        signboardWidth = Math.max(...xs) - signboardX;
-        signboardHeight = Math.max(...ys) - signboardY;
-      } else {
-        signboardX = currentSelectedArea.x;
-        signboardY = currentSelectedArea.y;
-        signboardWidth = currentSelectedArea.width;
-        signboardHeight = currentSelectedArea.height;
-      }
-      
-      // 마우스 위치를 이미지 좌표로 변환 (줌/팬 고려)
-      // 이미지 요소를 직접 찾아서 그 위치를 기준으로 계산
-      const imageElement = containerRef.current?.querySelector('img');
-      if (!imageElement) {
-        console.log('[상호 편집] 이미지 요소를 찾을 수 없음');
-        return;
-      }
-      
-      const imageRect = imageElement.getBoundingClientRect();
-      const containerRect = containerRef.current.getBoundingClientRect();
-      
-      // 마우스 위치를 이미지의 실제 화면 좌표로 변환
-      const mouseX = e.clientX - imageRect.left;
-      const mouseY = e.clientY - imageRect.top;
-      
-      // 이미지의 실제 크기 대비 비율로 변환 (ref 사용)
-      const currentImageSize = imageSizeRef.current;
-      const imageX = (mouseX / imageRect.width) * currentImageSize.width;
-      const imageY = (mouseY / imageRect.height) * currentImageSize.height;
-      
-      // 마우스 위치는 텍스트 중심 위치로 간주
-      // 간판 영역 내에서의 상대 위치
-      const textCenterX = imageX - signboardX;
-      const textCenterY = imageY - signboardY;
-      
-      console.log('[상호 편집] 좌표 계산:', {
-        mouseX,
-        mouseY,
-        imageRect: { left: imageRect.left, top: imageRect.top, width: imageRect.width, height: imageRect.height },
-        containerRect: { left: containerRect.left, top: containerRect.top, width: containerRect.width, height: containerRect.height },
-        imageSize: currentImageSize,
-        imageX,
-        imageY,
-        signboardX,
-        signboardY,
-        signboardWidth,
-        signboardHeight,
-        textCenterX,
-        textCenterY
-      });
-      
-      // 현재 간판의 실제 텍스트 크기 계산
-      const sb = (originalSignboardsRef.current || []).find(s => s.id === currentId);
-      
-      let estimatedTextWidth, estimatedTextHeight;
-      
-      const currentTextSizeInfo = textSizeInfoRef.current;
-      if (currentTextSizeInfo && currentTextSizeInfo.text_width && currentTextSizeInfo.text_height) {
-        // 백엔드에서 받은 실제 텍스트 크기 사용
-        const scaleX = imageSizeRef.current.width / currentTextSizeInfo.signboard_width;
-        const scaleY = imageSizeRef.current.height / currentTextSizeInfo.signboard_height;
-        estimatedTextWidth = currentTextSizeInfo.text_width * scaleX;
-        estimatedTextHeight = currentTextSizeInfo.text_height * scaleY;
-      } else {
-        // 폴백: Canvas로 계산
-        const currentFontSize = sb?.formData?.fontSize || 100;
-        const text = sb?.formData?.text || '';
-        const textDirection = sb?.formData?.textDirection || 'horizontal';
-        
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
-        const fontSizeInPx = (currentFontSize / 100) * (signboardHeight * 0.3);
-        ctx.font = `${fontSizeInPx}px "Malgun Gothic", "맑은 고딕", sans-serif`;
-        
-        let textWidth, textHeight;
-        if (textDirection === 'vertical') {
-          const textVertical = text.split('').join('\n');
-          const metrics = ctx.measureText(textVertical);
-          textWidth = metrics.width;
-          textHeight = text.length * fontSizeInPx * 1.2;
-        } else {
-          const metrics = ctx.measureText(text);
-          textWidth = metrics.width;
-          textHeight = fontSizeInPx * 1.2;
-        }
-        
-        estimatedTextWidth = textWidth;
-        estimatedTextHeight = textHeight;
-      }
-      
-      const availableWidth = signboardWidth - estimatedTextWidth;
-      const availableHeight = signboardHeight - estimatedTextHeight;
-      
-      // 텍스트 중심 위치를 0-100% 범위로 변환 (제한 없이 자유롭게 이동)
-      const xInSignboard = availableWidth > 0 
-        ? ((textCenterX - estimatedTextWidth / 2) / availableWidth) * 100 
-        : 50;
-      const yInSignboard = availableHeight > 0 
-        ? ((textCenterY - estimatedTextHeight / 2) / availableHeight) * 100 
-        : 50;
-      
-      // 0-100% 범위로만 제한 (간판 영역 밖으로 나가는 것은 허용)
-      const clampedX = Math.max(0, Math.min(100, xInSignboard));
-      const clampedY = Math.max(0, Math.min(100, yInSignboard));
-      
-      console.log('[상호 편집] 드래그 중 위치 업데이트:', { 
-        xInSignboard, 
-        yInSignboard, 
-        clampedX, 
-        clampedY,
-        currentId,
-        textCenterX,
-        textCenterY,
-        signboardWidth,
-        signboardHeight,
-        imageX,
-        imageY,
-        mouseX,
-        mouseY
-      });
-      
-      setTextPositions((prev) => {
-        const newPos = {
-          ...prev,
-          [currentId]: { 
-            x: clampedX, 
-            y: clampedY 
-          },
-        };
-        console.log('[상호 편집] textPositions 업데이트 (드래그 중):', {
-          prev: JSON.parse(JSON.stringify(prev)),
-          newPos: JSON.parse(JSON.stringify(newPos)),
-          currentId: currentId,
-          clampedX: clampedX,
-          clampedY: clampedY,
-          newPosString: JSON.stringify(newPos),
-          newPosCurrentId: newPos[currentId]
-        });
-        return newPos;
-      });
-    };
-    
-    const handleUp = () => {
-      console.log('[상호 편집] 드래그 종료');
-      draggingTextIdRef.current = null;
-      setDraggingTextId(null);
-      window.removeEventListener('mousemove', handleMove);
-      window.removeEventListener('mouseup', handleUp);
-    };
-    
-    console.log('[상호 편집] 이벤트 리스너 등록 (직접 등록)');
-    window.addEventListener('mousemove', handleMove);
-    window.addEventListener('mouseup', handleUp);
-  };
-
   // originalSignboards를 ref로 저장하여 클로저 문제 방지
   useEffect(() => {
     originalSignboardsRef.current = originalSignboards;
@@ -458,97 +194,7 @@ const ResultViewer = ({ results, loading, lights = [], onLightsChange = () => {}
     scaleRef.current = scale;
     offsetRef.current = offset;
   }, [originalSignboards, selectedArea, scale, offset]);
-
-  const handleTextMouseMove = useCallback((e) => {
-    if (!draggingTextId || draggingTextId === null || !containerRef.current || !imageRef.current || !selectedArea) {
-      return;
-    }
-    console.log('[상호 편집] handleTextMouseMove 호출됨', draggingTextId);
-    
-    // 간판 영역 계산
-    let signboardX, signboardY, signboardWidth, signboardHeight;
-    if (selectedArea.type === 'polygon' && selectedArea.points.length >= 4) {
-      const xs = selectedArea.points.map(p => p.x);
-      const ys = selectedArea.points.map(p => p.y);
-      signboardX = Math.min(...xs);
-      signboardY = Math.min(...ys);
-      signboardWidth = Math.max(...xs) - signboardX;
-      signboardHeight = Math.max(...ys) - signboardY;
-    } else {
-      signboardX = selectedArea.x;
-      signboardY = selectedArea.y;
-      signboardWidth = selectedArea.width;
-      signboardHeight = selectedArea.height;
-    }
-    
-    // 마우스 위치를 이미지 좌표로 변환 (줌/팬 고려)
-    const containerRect = containerRef.current.getBoundingClientRect();
-    const mouseX = e.clientX - containerRect.left;
-    const mouseY = e.clientY - containerRect.top;
-    
-    // 줌/팬이 적용된 이미지 내에서의 실제 좌표
-    const imageX = (mouseX - offset.x) / scale;
-    const imageY = (mouseY - offset.y) / scale;
-    
-    // 마우스 위치는 텍스트 중심 위치로 간주
-    // 간판 내에서의 텍스트 중심 위치
-    const textCenterX = imageX - signboardX;
-    const textCenterY = imageY - signboardY;
-    
-    // 현재 간판의 텍스트 크기 추정 (fontSize 기반) - ref 사용
-    const sb = (originalSignboardsRef.current || []).find(s => s.id === draggingTextId);
-    const currentFontSize = sb?.formData?.fontSize || 100;
-    const baseRatio = Math.sqrt(currentFontSize / 100);
-    const estimatedTextWidth = signboardWidth * 0.5 * baseRatio;
-    const estimatedTextHeight = signboardHeight * 0.4 * baseRatio;
-    
-    // 백엔드와 동일한 방식으로 text_position_x/y 계산
-    // text_center_x = text_width/2 + (width - text_width) * (text_position_x / 100)
-    // 따라서: text_position_x = ((text_center_x - text_width/2) / (width - text_width)) * 100
-    const availableWidth = signboardWidth - estimatedTextWidth;
-    const availableHeight = signboardHeight - estimatedTextHeight;
-    
-    const xInSignboard = availableWidth > 0 
-      ? ((textCenterX - estimatedTextWidth / 2) / availableWidth) * 100 
-      : 50;
-    const yInSignboard = availableHeight > 0 
-      ? ((textCenterY - estimatedTextHeight / 2) / availableHeight) * 100 
-      : 50;
-    
-    console.log('[상호 편집] 드래그 중 위치 업데이트:', { xInSignboard, yInSignboard });
-    setTextPositions((prev) => {
-      const newPos = {
-        ...prev,
-        [draggingTextId]: { 
-          ...(prev[draggingTextId] || {}), 
-          x: Math.max(0, Math.min(100, xInSignboard)), 
-          y: Math.max(0, Math.min(100, yInSignboard)) 
-        },
-      };
-      return newPos;
-    });
-  }, [draggingTextId, selectedArea, scale, offset]);
-
-  const handleTextMouseUp = () => {
-    draggingTextIdRef.current = null;
-    setDraggingTextId(null);
-  };
-
-  // 이제 handleTextMouseDown에서 직접 이벤트 리스너를 등록하므로
-  // 이 useEffect는 제거하거나 백업용으로만 사용
-  // useEffect(() => {
-  //   if (draggingTextId !== null && draggingTextId !== undefined) {
-  //     console.log('[상호 편집] 이벤트 리스너 등록, draggingTextId:', draggingTextId);
-  //     window.addEventListener('mousemove', handleTextMouseMove);
-  //     window.addEventListener('mouseup', handleTextMouseUp);
-  //     return () => {
-  //       console.log('[상호 편집] 이벤트 리스너 제거');
-  //       window.removeEventListener('mousemove', handleTextMouseMove);
-  //       window.removeEventListener('mouseup', handleTextMouseUp);
-  //     };
-  //   }
-  // }, [draggingTextId, handleTextMouseMove, handleTextMouseUp]);
-
+  // originalSignboards를 ref로 저장하여 클로저 문제 방지
   const [pendingTransforms, setPendingTransforms] = useState({});
 
   const handleApplyTransforms = () => {
@@ -645,7 +291,6 @@ const ResultViewer = ({ results, loading, lights = [], onLightsChange = () => {}
               if (!showTransform) {
                 // 간판 편집 모드로 전환할 때 조명 편집 모드 비활성화
                 setSelectedLightId(null);
-                setShowTextEdit(false);
               }
             }}
             className={`px-3 py-1 text-sm rounded-lg transition-colors ${
@@ -656,42 +301,10 @@ const ResultViewer = ({ results, loading, lights = [], onLightsChange = () => {}
           >
             {showTransform ? '✓ 편집 중' : '✏️ 간판 편집'}
           </button>
-          <button
-            onClick={() => {
-              const next = !showTextEdit;
-              setShowTextEdit(next);
-              if (next) {
-                setShowTransform(false);
-                const initial = {};
-                (originalSignboards || []).forEach((sb) => {
-                  initial[sb.id] = {
-                    x: sb.formData?.textPositionX ?? 50,
-                    y: sb.formData?.textPositionY ?? 50,
-                  };
-                });
-                setTextPositions(initial);
-              }
-            }}
-            className={`px-3 py-1 text-sm rounded-lg transition-colors ${
-              showTextEdit 
-                ? 'bg-purple-500 text-white' 
-                : 'bg-purple-500/80 hover:bg-purple-500 text-white'
-            }`}
-          >
-            {showTextEdit ? '✓ 상호 편집' : '✏️ 상호 위치'}
-          </button>
           {/* Transform 모드일 때 적용 버튼 */}
           {showTransform && (
             <button
               onClick={handleApplyTransforms}
-              className="px-6 py-2 bg-gradient-to-r from-green-500 to-blue-600 hover:from-green-600 hover:to-blue-700 text-white rounded-lg font-bold shadow-xl"
-            >
-              ✓ 적용하기
-            </button>
-          )}
-          {showTextEdit && (
-            <button
-              onClick={() => onApplyTextPositions(textPositions)}
               className="px-6 py-2 bg-gradient-to-r from-green-500 to-blue-600 hover:from-green-600 hover:to-blue-700 text-white rounded-lg font-bold shadow-xl"
             >
               ✓ 적용하기
@@ -757,8 +370,8 @@ const ResultViewer = ({ results, loading, lights = [], onLightsChange = () => {}
               transition: isPanning ? 'none' : 'transform 0.1s ease-out'
             }}
           />
-          {/* 간판 편집 오버레이 */}
-          {showTransform && !showTextEdit && originalSignboards.length > 0 && (
+          {/* 간판 편집 오버레이 (상호 위치 편집 포함) */}
+          {showTransform && originalSignboards.length > 0 && (
             <div 
               className="absolute inset-0 pointer-events-none" 
               style={{ 
@@ -767,37 +380,8 @@ const ResultViewer = ({ results, loading, lights = [], onLightsChange = () => {}
                 transformOrigin: '0 0'
               }}
             >
-              <SignboardTransform
-                signboards={originalSignboards.map((sb, idx) => ({
-                  id: idx,
-                  polygon_points: selectedArea ? (selectedArea.type === 'polygon' 
-                    ? selectedArea.points.map(p => [p.x, p.y])
-                    : [[selectedArea.x, selectedArea.y], 
-                       [selectedArea.x + selectedArea.width, selectedArea.y],
-                       [selectedArea.x + selectedArea.width, selectedArea.y + selectedArea.height],
-                       [selectedArea.x, selectedArea.y + selectedArea.height]])
-                    : [],
-                  text: sb.formData?.text || ''
-                }))}
-                originalSignboards={originalSignboards}
-                imageSize={imageSize}
-                onTransformChange={setPendingTransforms}
-                onApply={handleApplyTransforms}
-              />
-            </div>
-          )}
-          {/* 상호 위치 편집 오버레이 - 박스 형태로 표시 */}
-          {showTextEdit && !showTransform && selectedArea && (
-            <div 
-              className="absolute inset-0 pointer-events-none" 
-              style={{ 
-                zIndex: 50,
-                transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})`,
-                transformOrigin: '0 0'
-              }}
-            >
-              {/* 간판 영역 표시 (이동 가능 범위) */}
-              {(() => {
+              {/* 간판편집 모드에서도 간판 영역(처음 설정한 영역)을 노란 박스로 표시 */}
+              {selectedArea && (() => {
                 let signboardX, signboardY, signboardWidth, signboardHeight;
                 if (selectedArea.type === 'polygon' && selectedArea.points.length >= 4) {
                   const xs = selectedArea.points.map(p => p.x);
@@ -812,12 +396,12 @@ const ResultViewer = ({ results, loading, lights = [], onLightsChange = () => {}
                   signboardWidth = selectedArea.width;
                   signboardHeight = selectedArea.height;
                 }
-                
+
                 const signboardXPercent = (signboardX / imageSize.width) * 100;
                 const signboardYPercent = (signboardY / imageSize.height) * 100;
                 const signboardWidthPercent = (signboardWidth / imageSize.width) * 100;
                 const signboardHeightPercent = (signboardHeight / imageSize.height) * 100;
-                
+
                 return (
                   <div
                     className="absolute pointer-events-none"
@@ -831,129 +415,35 @@ const ResultViewer = ({ results, loading, lights = [], onLightsChange = () => {}
                       borderRadius: '4px',
                       boxShadow: '0 0 0 2px rgba(255, 255, 255, 0.3)',
                     }}
-                    title="텍스트 이동 가능 범위"
+                    title="처음 설정한 간판 영역"
                   />
                 );
               })()}
-              {(originalSignboards || []).map((sb) => {
-                const pos = textPositions[sb.id] || { x: sb.formData?.textPositionX ?? 50, y: sb.formData?.textPositionY ?? 50 };
-                console.log('[상호 편집] 박스 렌더링:', { 
-                  sbId: sb.id, 
-                  pos, 
-                  textPositions: textPositions[sb.id],
-                  textPositionsAll: textPositions,
-                  posX: pos.x,
-                  posY: pos.y,
-                  formDataX: sb.formData?.textPositionX,
-                  formDataY: sb.formData?.textPositionY
-                });
-                const currentFontSize = sb.formData?.fontSize || 100;
-                
-                // 간판 영역(selectedArea) 기준으로 박스 크기 계산
-                let signboardWidth, signboardHeight, signboardX, signboardY;
-                
-                if (selectedArea.type === 'polygon' && selectedArea.points.length >= 4) {
-                  const xs = selectedArea.points.map(p => p.x);
-                  const ys = selectedArea.points.map(p => p.y);
-                  signboardX = Math.min(...xs);
-                  signboardY = Math.min(...ys);
-                  signboardWidth = Math.max(...xs) - signboardX;
-                  signboardHeight = Math.max(...ys) - signboardY;
-                } else {
-                  signboardX = selectedArea.x;
-                  signboardY = selectedArea.y;
-                  signboardWidth = selectedArea.width;
-                  signboardHeight = selectedArea.height;
-                }
-                
-                // 백엔드에서 받은 실제 텍스트 크기 사용 (가장 정확함)
-                let finalTextWidth, finalTextHeight;
-                
-                if (textSizeInfo && textSizeInfo.text_width && textSizeInfo.text_height) {
-                  // 백엔드에서 계산한 실제 텍스트 크기 사용
-                  // 백엔드의 text_width, text_height는 간판 크기 기준이므로, 이미지 크기로 변환
-                  const scaleX = imageSize.width / textSizeInfo.signboard_width;
-                  const scaleY = imageSize.height / textSizeInfo.signboard_height;
-                  // 백엔드에서 계산한 정확한 크기 사용 (여유 공간 없이)
-                  finalTextWidth = textSizeInfo.text_width * scaleX;
-                  finalTextHeight = textSizeInfo.text_height * scaleY;
-                } else {
-                  // 백엔드 정보가 없으면 Canvas로 계산 (폴백)
-                  const text = sb.formData?.text || '';
-                  const textDirection = sb.formData?.textDirection || 'horizontal';
-                  
-                  const canvas = document.createElement('canvas');
-                  const ctx = canvas.getContext('2d');
-                  const fontSizeInPx = (currentFontSize / 100) * (signboardHeight * 0.3);
-                  ctx.font = `${fontSizeInPx}px "Malgun Gothic", "맑은 고딕", sans-serif`;
-                  
-                  let textWidth, textHeight;
-                  if (textDirection === 'vertical') {
-                    const textVertical = text.split('').join('\n');
-                    const metrics = ctx.measureText(textVertical);
-                    textWidth = metrics.width;
-                    textHeight = text.length * fontSizeInPx * 1.2;
-                  } else {
-                    const metrics = ctx.measureText(text);
-                    textWidth = metrics.width;
-                    textHeight = fontSizeInPx * 1.2;
-                  }
-                  
-                  finalTextWidth = textWidth;
-                  finalTextHeight = textHeight;
-                }
-                
-                // 이미지 크기 대비 퍼센트 값
-                const textWidthPx = (finalTextWidth / imageSize.width) * 100;
-                const textHeightPx = (finalTextHeight / imageSize.height) * 100;
-                
-                // 백엔드와 동일한 방식으로 텍스트 중심 위치 계산
-                // text_position_x가 0이면 텍스트 중심이 간판 왼쪽 끝 + text_width/2
-                // text_position_x가 50이면 텍스트 중심이 간판 중앙
-                // text_position_x가 100이면 텍스트 중심이 간판 오른쪽 끝 - text_width/2
-                // 프론트엔드에서는: text_center_x = text_width/2 + (signboardWidth - text_width) * (pos.x / 100)
-                const textCenterX = finalTextWidth / 2 + (signboardWidth - finalTextWidth) * (pos.x / 100);
-                const textCenterY = finalTextHeight / 2 + (signboardHeight - finalTextHeight) * (pos.y / 100);
-                
-                // 텍스트 중심 위치를 이미지 전체 기준으로 변환
-                const textXInImage = (signboardX + textCenterX) / imageSize.width * 100;
-                const textYInImage = (signboardY + textCenterY) / imageSize.height * 100;
-                
-                return (
-                  <div
-                    key={sb.id}
-                    className="absolute cursor-move"
-                    style={{
-                      left: `${textXInImage}%`,
-                      top: `${textYInImage}%`,
-                      width: `${textWidthPx}%`,
-                      height: `${textHeightPx}%`,
-                      transform: 'translate(-50%, -50%)',
-                      border: '2px solid #A855F7', // 보라색 테두리
-                      backgroundColor: 'rgba(168, 85, 247, 0.15)', // 반투명 보라색 배경
-                      borderRadius: '4px',
-                      boxShadow: '0 0 0 2px rgba(255, 255, 255, 0.5)',
-                      zIndex: 100, // 다른 요소 위에 표시
-                      pointerEvents: 'auto', // 드래그 가능하도록
-                    }}
-                    onMouseDown={(e) => {
-                      e.stopPropagation();
-                      e.preventDefault();
-                      handleTextMouseDown(e, sb.id);
-                    }}
-                    title="드래그해서 텍스트 위치 조절"
-                  >
-                    {/* 텍스트 라벨 */}
-                    <div className="absolute -top-6 left-0 bg-purple-500 text-white text-xs px-2 py-1 rounded whitespace-nowrap z-10">
-                      {sb.formData?.text || `상호 ${sb.id + 1}`}
-                    </div>
-                  </div>
-                );
-              })}
+
+              <SignboardTransform
+                key={`${originalSignboards[0]?.formData?.fontSize || 100}-${originalSignboards[0]?.formData?.rotation || 0}`}
+                signboards={originalSignboards.map((sb, idx) => ({
+                  id: idx,
+                  polygon_points: selectedArea ? (selectedArea.type === 'polygon' 
+                    ? selectedArea.points.map(p => [p.x, p.y])
+                    : [[selectedArea.x, selectedArea.y], 
+                       [selectedArea.x + selectedArea.width, selectedArea.y],
+                       [selectedArea.x + selectedArea.width, selectedArea.y + selectedArea.height],
+                       [selectedArea.x, selectedArea.y + selectedArea.height]])
+                    : [],
+                  text: sb.formData?.text || ''
+                }))}
+                originalSignboards={originalSignboards}
+                imageSize={imageSize}
+                selectedArea={selectedArea}
+                textSizeInfo={textSizeInfo}
+                onTransformChange={setPendingTransforms}
+                onApply={handleApplyTransforms}
+              />
             </div>
           )}
           {/* 조명 오버레이: 야간에서만 표시, 편집 모드가 아닐 때만 */}
-          {viewMode === 'night' && lightsEnabled && !showTransform && !showTextEdit && (
+          {viewMode === 'night' && lightsEnabled && !showTransform && (
             <div 
               className="absolute inset-0 pointer-events-none"
               style={{
@@ -1021,7 +511,7 @@ const ResultViewer = ({ results, loading, lights = [], onLightsChange = () => {}
           )}
 
           {/* 드래그 핸들 (조명 기구 클릭) - 편집 모드가 아닐 때만 */}
-          {viewMode === 'night' && !showTransform && !showTextEdit && (
+          {viewMode === 'night' && !showTransform && (
             <div 
               className="absolute inset-0"
               style={{

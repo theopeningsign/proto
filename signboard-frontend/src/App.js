@@ -252,10 +252,18 @@ function App() {
                     const transform = transforms[0];
                     if (transform) {
                       if (transform.fontSize !== undefined) {
-                        // fontSize가 변경되면 originalFontSize도 현재 값으로 업데이트
-                        // (다음에 간판 편집을 열 때 현재 크기를 기준으로 박스가 표시되도록)
+                        // fontSize만 업데이트하고, originalFontSize는 유지
+                        // originalFontSize는 처음 설정된 기준값으로 유지되어야 함
+                        // (다음에 간판 편집을 열 때 originalFontSize 대비 fontSize 비율로 박스 크기 계산)
                         updatedFormData.fontSize = transform.fontSize;
-                        updatedFormData.originalFontSize = transform.fontSize; // 현재 fontSize를 originalFontSize로 저장
+                        // originalFontSize는 변경하지 않음 (기존 값 유지)
+                      }
+                      // 간판 영역 내 텍스트 위치(0-100%) 업데이트
+                      if (transform.textPositionX !== undefined) {
+                        updatedFormData.textPositionX = transform.textPositionX;
+                      }
+                      if (transform.textPositionY !== undefined) {
+                        updatedFormData.textPositionY = transform.textPositionY;
                       }
                       // rotation 값을 rotate90으로 변환 (90도 단위로만 지원하는 경우)
                       // 또는 rotation 파라미터로 직접 전달
