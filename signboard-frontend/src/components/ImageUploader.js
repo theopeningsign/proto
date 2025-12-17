@@ -4,10 +4,15 @@ const ImageUploader = ({ image, onImageUpload, selectedArea, onAreaChange, signb
   const canvasRef = useRef(null);
   const [imageUrl, setImageUrl] = useState(null);
   const [isDragging, setIsDragging] = useState(false);
-  const [points, setPoints] = useState([]); // 현재 편집 중인 폴리곤 점들
+  const [points, setPoints] = useState([]); // 현재 편집 중인 점들 (폴리곤/사각형 공통)
   const [isComplete, setIsComplete] = useState(false);
-  const [draggingPointIndex, setDraggingPointIndex] = useState(null); // 드래그 중인 점 인덱스
+  const [draggingPointIndex, setDraggingPointIndex] = useState(null); // 드래그 중인 점 인덱스 (폴리곤 모드)
   const [hoveredPointIndex, setHoveredPointIndex] = useState(null); // hover 중인 점
+
+  // 영역 선택 모드: polygon(점찍기) | rect(사각형 드래그)
+  const [selectionMode, setSelectionMode] = useState('polygon');
+  const [isRectSelecting, setIsRectSelecting] = useState(false);
+  const [rectStart, setRectStart] = useState(null);
   
   // 줌/팬 기능
   const [scale, setScale] = useState(1); // 줌 레벨
@@ -37,6 +42,18 @@ const ImageUploader = ({ image, onImageUpload, selectedArea, onAreaChange, signb
     if (selectedArea && selectedArea.type === 'polygon') {
       setPoints(selectedArea.points);
       setIsComplete(true);
+      setSelectionMode('polygon');
+    } else if (selectedArea && selectedArea.type === 'rect') {
+      const { x, y, width, height } = selectedArea;
+      const rectPoints = [
+        { x, y },
+        { x: x + width, y },
+        { x: x + width, y: y + height },
+        { x, y: y + height },
+      ];
+      setPoints(rectPoints);
+      setIsComplete(true);
+      setSelectionMode('rect');
     } else if (!selectedArea) {
       setPoints([]);
       setIsComplete(false);
@@ -222,6 +239,34 @@ const ImageUploader = ({ image, onImageUpload, selectedArea, onAreaChange, signb
     }
 
     const { x, y } = getCanvasCoords(e);
+
+    // 사각형 모드
+    if (selectionMode === 'rect') {
+      const pointIndex = getPointAtPosition(x, y);
+
+      if (isComplete && pointIndex !== -1 && points.length === 4) {
+        // 이미 선택된 사각형의 모서리 클릭 → 그 코너를 드래그로 수정
+        setDraggingPointIndex(pointIndex);
+        setIsRectSelecting(false);
+        e.preventDefault();
+        return;
+      }
+
+      // 새 사각형 드래그 시작
+      setIsRectSelecting(true);
+      setIsComplete(false);
+      setRectStart({ x, y });
+      const rectPoints = [
+        { x, y },
+        { x, y },
+        { x, y },
+        { x, y },
+      ];
+      setPoints(rectPoints);
+      return;
+    }
+
+    // 폴리곤 모드
     const pointIndex = getPointAtPosition(x, y);
 
     if (pointIndex !== -1) {
@@ -248,6 +293,55 @@ const ImageUploader = ({ image, onImageUpload, selectedArea, onAreaChange, signb
 
     const { x, y } = getCanvasCoords(e);
 
+    if (selectionMode === 'rect') {
+      if (isRectSelecting && rectStart) {
+        // 새 사각형 드래그 중: 시작/현재 위치로 직사각형 계산
+        const x1 = rectStart.x;
+        const y1 = rectStart.y;
+        const x2 = x;
+        const y2 = y;
+        const minX = Math.min(x1, x2);
+        const maxX = Math.max(x1, x2);
+        const minY = Math.min(y1, y2);
+        const maxY = Math.max(y1, y2);
+        const rectPoints = [
+          { x: minX, y: minY },
+          { x: maxX, y: minY },
+          { x: maxX, y: maxY },
+          { x: minX, y: maxY },
+        ];
+        setPoints(rectPoints);
+        return;
+      }
+
+      if (draggingPointIndex !== null && points.length === 4) {
+        // 이미 선택된 사각형의 코너를 드래그해서 크기 수정
+        // 대각선 반대편 코너를 anchor로 두고, 나머지 두 점은 자동 보정
+        const anchorIndex = (draggingPointIndex + 2) % 4;
+        const anchor = points[anchorIndex];
+
+        const x1 = anchor.x;
+        const y1 = anchor.y;
+        const x2 = x;
+        const y2 = y;
+
+        const minX = Math.min(x1, x2);
+        const maxX = Math.max(x1, x2);
+        const minY = Math.min(y1, y2);
+        const maxY = Math.max(y1, y2);
+
+        const rectPoints = [
+          { x: minX, y: minY },
+          { x: maxX, y: minY },
+          { x: maxX, y: maxY },
+          { x: minX, y: maxY },
+        ];
+        setPoints(rectPoints);
+        return;
+      }
+    }
+
+    // 폴리곤 모드
     if (draggingPointIndex !== null) {
       // 드래그 중: 점 위치 업데이트
       const newPoints = [...points];
@@ -261,6 +355,30 @@ const ImageUploader = ({ image, onImageUpload, selectedArea, onAreaChange, signb
   };
 
   const handleCanvasMouseUp = () => {
+    if (selectionMode === 'rect' && points.length === 4) {
+      // 사각형 선택/수정 완료 → rect 영역으로 onAreaChange 호출
+      const xs = points.map(p => p.x);
+      const ys = points.map(p => p.y);
+      const minX = Math.min(...xs);
+      const maxX = Math.max(...xs);
+      const minY = Math.min(...ys);
+      const maxY = Math.max(...ys);
+      const width = maxX - minX;
+      const height = maxY - minY;
+
+      if (width > 0 && height > 0) {
+        setIsComplete(true);
+        onAreaChange({
+          type: 'rect',
+          x: minX,
+          y: minY,
+          width,
+          height,
+        });
+      }
+    }
+
+    setIsRectSelecting(false);
     setDraggingPointIndex(null);
     setIsPanning(false);
   };
@@ -302,6 +420,11 @@ const ImageUploader = ({ image, onImageUpload, selectedArea, onAreaChange, signb
   };
 
   const handleCompleteSelection = () => {
+    if (selectionMode === 'rect') {
+      // 사각형 모드에서는 드래그로 이미 선택 완료되므로 별도 완료 버튼 필요 없음
+      return;
+    }
+
     if (points.length < 3) {
       alert('최소 3개 이상의 점을 선택해주세요.');
       return;
@@ -319,6 +442,8 @@ const ImageUploader = ({ image, onImageUpload, selectedArea, onAreaChange, signb
   const handleResetSelection = () => {
     setPoints([]);
     setIsComplete(false);
+    setIsRectSelecting(false);
+    setRectStart(null);
     onAreaChange(null);
   };
 
@@ -382,6 +507,37 @@ const ImageUploader = ({ image, onImageUpload, selectedArea, onAreaChange, signb
       ) : (
         <div>
           <div className="mb-4 relative">
+            {/* 선택 모드 토글 */}
+            <div className="flex gap-2 mb-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectionMode('polygon');
+                  handleResetSelection();
+                }}
+                className={`px-3 py-1 rounded-lg text-xs border transition-colors ${
+                  selectionMode === 'polygon'
+                    ? 'bg-blue-500 border-blue-500 text-white'
+                    : 'bg-white/5 border-white/20 text-gray-300 hover:border-blue-500'
+                }`}
+              >
+                🔺 점찍기(다각형)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectionMode('rect');
+                  handleResetSelection();
+                }}
+                className={`px-3 py-1 rounded-lg text-xs border transition-colors ${
+                  selectionMode === 'rect'
+                    ? 'bg-emerald-500 border-emerald-500 text-white'
+                    : 'bg-white/5 border-white/20 text-gray-300 hover:border-emerald-500'
+                }`}
+              >
+                ▭ 사각형 드래그
+              </button>
+            </div>
             <canvas
               ref={canvasRef}
               onMouseDown={handleCanvasMouseDown}
@@ -393,7 +549,8 @@ const ImageUploader = ({ image, onImageUpload, selectedArea, onAreaChange, signb
                 isPanning ? 'cursor-grabbing' :
                 draggingPointIndex !== null ? 'cursor-grabbing' : 
                 hoveredPointIndex !== null ? 'cursor-grab' :
-                isComplete ? 'cursor-default' : 'cursor-crosshair'
+                isComplete ? 'cursor-default' :
+                selectionMode === 'rect' ? 'cursor-crosshair' : 'cursor-crosshair'
               }`}
               style={{ maxHeight: '500px' }}
             />
@@ -437,10 +594,15 @@ const ImageUploader = ({ image, onImageUpload, selectedArea, onAreaChange, signb
             {/* 상태 표시 */}
             <div className="flex items-center justify-between p-3 bg-white/5 rounded-lg">
               <span className="text-sm text-gray-300">
-                {isComplete 
-                  ? `✓ 영역 선택 완료 (${points.length}개 점)` 
-                  : `점 클릭: ${points.length}개 (최소 3개)`
-                }
+                {selectionMode === 'polygon' ? (
+                  isComplete 
+                    ? `✓ 영역 선택 완료 (${points.length}개 점)` 
+                    : `점 클릭: ${points.length}개 (최소 3개)`
+                ) : (
+                  isComplete
+                    ? '✓ 사각형 영역 선택 완료'
+                    : '드래그해서 사각형 영역을 선택하세요'
+                )}
               </span>
               {!isComplete && points.length >= 3 && (
                 <span className="text-xs text-green-400">→ 영역 완료 버튼을 누르세요</span>
@@ -449,22 +611,44 @@ const ImageUploader = ({ image, onImageUpload, selectedArea, onAreaChange, signb
 
             {/* 버튼들 */}
             <div className="flex gap-3">
-              {!isComplete ? (
-                <>
-                  <button
-                    onClick={handleCompleteSelection}
-                    disabled={points.length < 3}
-                    className="flex-1 bg-gradient-to-r from-blue-500 to-purple-600 rounded-lg px-6 py-3 text-white font-semibold disabled:from-gray-600 disabled:to-gray-700 disabled:cursor-not-allowed hover:scale-105 transition-transform"
-                  >
-                    영역 완료
-                  </button>
-                  <button
-                    onClick={handleResetSelection}
-                    className="px-6 py-3 bg-white/5 border border-white/20 rounded-lg text-white hover:bg-white/10 transition-colors"
-                  >
-                    다시 선택
-                  </button>
-                </>
+              {selectionMode === 'polygon' ? (
+                !isComplete ? (
+                  <>
+                    <button
+                      onClick={handleCompleteSelection}
+                      disabled={points.length < 3}
+                      className="flex-1 bg-gradient-to-r from-blue-500 to-purple-600 rounded-lg px-6 py-3 text-white font-semibold disabled:from-gray-600 disabled:to-gray-700 disabled:cursor-not-allowed hover:scale-105 transition-transform"
+                    >
+                      영역 완료
+                    </button>
+                    <button
+                      onClick={handleResetSelection}
+                      className="px-6 py-3 bg-white/5 border border-white/20 rounded-lg text-white hover:bg-white/10 transition-colors"
+                    >
+                      다시 선택
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      onClick={handleResetSelection}
+                      className="flex-1 px-6 py-3 bg-white/5 border border-white/20 rounded-lg text-white hover:bg-white/10 transition-colors"
+                    >
+                      영역 다시 선택
+                    </button>
+                    <button
+                      onClick={() => {
+                        setImageUrl(null);
+                        onImageUpload(null);
+                        setPoints([]);
+                        setIsComplete(false);
+                      }}
+                      className="px-6 py-3 bg-red-500/80 hover:bg-red-500 rounded-lg text-white transition-colors"
+                    >
+                      사진 변경
+                    </button>
+                  </>
+                )
               ) : (
                 <>
                   <button

@@ -230,51 +230,6 @@ const SignboardForm = ({ formData, onFormDataChange, section = 'full' }) => {
 
         {showAdvanced && (
         <>
-        {/* 글자 크기 */}
-        <div className="md:col-span-2">
-          <label className="block text-sm font-medium text-gray-300 mb-2">
-            글자 크기: {formData.fontSize}px
-          </label>
-          <input
-            type="range"
-            min="60"
-            max="200"
-            value={formData.fontSize}
-            onChange={(e) => handleChange('fontSize', parseInt(e.target.value))}
-            className="w-full h-2 bg-white/10 rounded-lg appearance-none cursor-pointer accent-blue-500"
-          />
-        </div>
-
-        {/* 텍스트 위치 X */}
-        <div>
-          <label className="block text-sm font-medium text-gray-300 mb-2">
-            텍스트 가로 위치: {formData.textPositionX}%
-          </label>
-          <input
-            type="range"
-            min="0"
-            max="100"
-            value={formData.textPositionX}
-            onChange={(e) => handleChange('textPositionX', parseInt(e.target.value))}
-            className="w-full h-2 bg-white/10 rounded-lg appearance-none cursor-pointer accent-purple-500"
-          />
-        </div>
-
-        {/* 텍스트 위치 Y */}
-        <div>
-          <label className="block text-sm font-medium text-gray-300 mb-2">
-            텍스트 세로 위치: {formData.textPositionY}%
-          </label>
-          <input
-            type="range"
-            min="0"
-            max="100"
-            value={formData.textPositionY}
-            onChange={(e) => handleChange('textPositionY', parseInt(e.target.value))}
-            className="w-full h-2 bg-white/10 rounded-lg appearance-none cursor-pointer accent-purple-500"
-          />
-        </div>
-
         {/* 로고 발광 여부 */}
         {formData.logo && (
           <div className="md:col-span-2">
