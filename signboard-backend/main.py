@@ -748,6 +748,10 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
             text_height = bbox[3] - bbox[1]
             break
     
+    # 최종 선택된 bbox의 상단/하단 (baseline 기준 오프셋)
+    bbox_top = bbox[1]
+    bbox_bottom = bbox[3]
+    
     # text_position_x, text_position_y 사용 (간판 내에서의 위치, 0-100%)
     # 0% ~ 100% 를 간판 영역 전체에 가깝게 사용하도록 재매핑
     text_pos_x_clamped = max(0, min(100, text_position_x))
@@ -762,19 +766,25 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
         min_padding_y = int(height * 0.05)
         min_padding_x = int(width * 0.05)
 
-    # 세로 방향 사용 가능 영역 (텍스트 실제 높이 고려)
-    # text_position_y = 50일 때 텍스트의 중심이 간판의 정중앙에 오도록 조정
-    usable_height = height - (min_padding_y * 2) - text_height
-    if usable_height < 0:
+    # 세로 방향 위치 계산 (텍스트 실제 bbox 기준)
+    # - bbox_top/bottom 은 baseline=0 기준에서의 텍스트 상단/하단 오프셋
+    # - baseline y 위치를 조절해서 텍스트 "시각적 중심"이 간판 박스 안에서 움직이도록 함
+    #   text_position_y: 0 -> 텍스트 전체가 위로 붙음, 50 -> 중앙, 100 -> 아래로 붙음
+    # baseline 이 y_offset 라고 할 때:
+    #   실제 텍스트 상단 = y_offset + bbox_top
+    #   실제 텍스트 하단 = y_offset + bbox_bottom
+    # 전체 텍스트가 박스 안에 들어가기 위한 baseline 범위:
+    baseline_min = -bbox_top             # 텍스트 상단이 0에 맞춰질 때
+    baseline_max = height - bbox_bottom  # 텍스트 하단이 height에 맞춰질 때
+    
+    if baseline_max < baseline_min:
         # 텍스트가 너무 큰 경우: 중앙 고정
         y_offset = (height - text_height) // 2
     else:
-        # text_position_y를 텍스트 중심 기준으로 계산
-        # 50%일 때 텍스트 중심이 간판 정중앙에 오도록
-        text_center_y = min_padding_y + text_height // 2 + int((text_pos_y_clamped / 100.0) * usable_height)
-        y_offset = text_center_y - text_height // 2
-        # 최소 패딩보다 작아지지 않도록 보정
-        y_offset = max(min_padding_y, y_offset)
+        # 0~100%를 baseline_min~baseline_max 에 선형 매핑
+        t = text_pos_y_clamped / 100.0
+        y_offset = baseline_min + t * (baseline_max - baseline_min)
+        y_offset = int(round(y_offset))
 
     # 가로 방향 사용 가능 영역 (텍스트 실제 너비 고려)
     usable_width = width - (min_padding_x * 2) - text_width
