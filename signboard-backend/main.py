@@ -1487,36 +1487,31 @@ def composite_signboard(
         # 다른 간판 종류: 전체 간판에 발광 강도 적용
         if sign_type == "후광채널":
             # 후광채널: 글자 뒤에서만 빛나는 효과
-            # 텍스트 마스크를 사용해서 글자 형태를 따라 빛나는 효과 구현
+            # 글자는 어두운 실루엣, 뒤쪽만 밝게 (진짜 후광 느낌)
             if text_layer is not None and warped_text_full is not None:
                 # warped_text_full은 이미 건물 사진 크기로 변환된 텍스트 레이어
                 # 텍스트 마스크 생성 (건물 사진 크기에서)
                 text_mask_warped = (warped_text_full.sum(axis=2) > 0).astype(np.float32)
                 
                 # 글자 뒤에서 빛나는 효과 (blur 적용) - 글자 윤곽을 따라 빛나도록
-                # 블러를 줄여서 글자 형태를 유지하면서 부드러운 후광 효과
-                backlight_blur = safe_gaussian_blur(text_mask_warped, (51, 51), 20)  # 블러 크기와 강도 줄임
-                backlight_blur = (backlight_blur * 1.2).clip(0, 1.0)  # 밝기 조정 (너무 밝지 않게)
+                backlight_blur = safe_gaussian_blur(text_mask_warped, (51, 51), 20)
+                backlight_blur = (backlight_blur * 1.2).clip(0, 1.0)
                 backlight_blur_3ch = np.stack([backlight_blur, backlight_blur, backlight_blur], axis=2)
                 
                 # 배경은 어둡게, 글자 뒤에서만 빛나는 효과 추가
                 base_night = night_base * (1 - combined_mask)
-                # 간판 배경은 어둡게
                 signboard_dark = warped_sign.astype(np.float32) * combined_mask * 0.25
-                # 글자 뒤 빛 효과 (밝은 흰색/노란색 glow) - 글자 마스크 영역에만 적용
-                # 글자 형태를 따라 빛나도록 적절한 밝기로 설정
-                backlight_glow = backlight_blur_3ch * 150.0  # 밝기 조정 (200에서 150으로 줄임)
-                
-                # 글자 영역에서 야간 효과를 절반 제거 (후광 때문에 글자가 더 밝게 보이도록)
-                # 주간 이미지에서 텍스트 부분 추출
+                backlight_glow = backlight_blur_3ch * 150.0
+
+                # 기본 야간 이미지 (배경 + 후광)
+                night_with_backlight = base_night + signboard_dark + backlight_glow
+
+                # 글자 영역을 어두운 실루엣으로 (주간 밝기의 20% 정도)
+                text_dark = warped_sign.astype(np.float32) * combined_mask * 0.2
                 text_mask_3ch = np.stack([text_mask_warped, text_mask_warped, text_mask_warped], axis=2)
-                # 주간 결과 이미지에서 텍스트 부분 추출
-                day_text = day_result.astype(np.float32) * text_mask_3ch
-                # 텍스트 영역에서 야간 효과를 50% 제거 (주간 밝기로 50% 복원)
-                text_restore_mask = text_mask_3ch * 0.5  # 50%만 복원
-                night_with_text_restore = base_night + signboard_dark + backlight_glow
-                # 텍스트 영역을 50% 주간 밝기로 복원
-                night_result = night_with_text_restore * (1 - text_restore_mask) + day_text * text_restore_mask
+                bg_mask_3ch = 1.0 - text_mask_3ch
+
+                night_result = night_with_backlight * bg_mask_3ch + text_dark * text_mask_3ch
                 night_result = np.clip(night_result, 0, 255).astype(np.uint8)
             else:
                 # 이미지 업로드 방식: 로고 윤곽을 따라 후광 효과 적용
