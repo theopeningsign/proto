@@ -1179,7 +1179,29 @@ def composite_signboard(
             base_night = night_base * (1 - combined_mask)
             # 이미지는 주간 밝기 그대로 (야간 효과 제거)
             image_contrib = warped_sign.astype(np.float32) * combined_mask
-            night_result = base_night + image_contrib
+            
+            # 전후광채널인 경우 후광 효과 추가
+            if sign_type == "전후광채널":
+                # 로고 마스크 생성 (밝은 부분 감지)
+                gray_sign = cv2.cvtColor(warped_sign, cv2.COLOR_BGR2GRAY)
+                # 검은색이 아닌 부분을 로고로 간주 (밝기 10 이상)
+                logo_mask = (gray_sign > 10).astype(np.float32)
+                
+                # 로고 마스크를 블러 처리해서 후광 효과 생성
+                logo_mask_1ch = logo_mask
+                backlight_blur = safe_gaussian_blur(logo_mask_1ch, (51, 51), 20)
+                backlight_blur = (backlight_blur * 1.2).clip(0, 1.0)
+                backlight_blur_3ch = np.stack([backlight_blur, backlight_blur, backlight_blur], axis=2)
+                backlight_glow = backlight_blur_3ch * 150.0
+                # 로고 영역을 제외한 주변에만 후광 효과 적용
+                logo_mask_3ch = np.stack([logo_mask, logo_mask, logo_mask], axis=2)
+                backlight_glow_masked = backlight_glow * (1 - logo_mask_3ch)
+                # 전광채널 기본 로직 (이미지는 그대로) + 로고 주변 후광 효과
+                night_result = base_night + image_contrib + backlight_glow_masked
+                night_result = np.clip(night_result, 0, 255).astype(np.uint8)
+            else:
+                # 전광채널: 기본 로직만
+                night_result = base_night + image_contrib
     else:
         # 다른 간판 종류: 전체 간판에 발광 강도 적용
         if sign_type == "후광채널":
