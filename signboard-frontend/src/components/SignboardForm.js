@@ -220,7 +220,6 @@ const SignboardForm = ({ formData, onFormDataChange, section = 'full' }) => {
             <option value="전광채널" className="bg-gray-800">전광채널 (앞면 발광)</option>
             <option value="후광채널" className="bg-gray-800">후광채널 (뒷면 발광)</option>
             <option value="전후광채널" className="bg-gray-800">전후광채널 (앞+뒤 발광)</option>
-            <option value="LED채널" className="bg-gray-800">LED채널</option>
             <option value="스카시" className="bg-gray-800">스카시 (비조명 입체)</option>
             <option value="플렉스" className="bg-gray-800">플렉스 (천 재질)</option>
           </select>

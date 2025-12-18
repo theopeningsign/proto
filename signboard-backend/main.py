@@ -526,36 +526,6 @@ def render_facade(text: str, bg_color: str, text_color: str, logo_img: Image.Ima
 
 # ========== 기타 간판 ==========
 
-def render_led_channel(text: str, bg_color: str, text_color: str, logo_img: Image.Image = None, text_direction: str = "horizontal", width: int = 1200, height: int = 300) -> np.ndarray:
-    """
-    LED채널: LED 전구 사용
-    - 밝고 선명한 발광
-    """
-    bg_rgb = hex_to_rgb(bg_color) if bg_color.startswith('#') else (0, 0, 0)
-    signboard = Image.new('RGB', (width, height), color=bg_rgb)
-    signboard_np = cv2.cvtColor(np.array(signboard), cv2.COLOR_RGB2BGR)
-    
-    if not text or not text.strip():
-        return signboard_np
-    
-    font = get_korean_font(100)
-    draw_temp = ImageDraw.Draw(Image.new('RGB', (width, height)))
-    bbox = draw_temp.textbbox((0, 0), text, font=font)
-    text_width = bbox[2] - bbox[0]
-    text_height = bbox[3] - bbox[1]
-    position = ((width - text_width) // 2, (height - text_height) // 2)
-    
-    text_rgb = hex_to_rgb(text_color) if text_color.startswith('#') else (255, 255, 255)
-    text_layer_rgba = extract_text_layer(text, font, text_rgb, (width, height), position)
-    text_layer_bgr = cv2.cvtColor(text_layer_rgba, cv2.COLOR_RGBA2BGR)
-    
-    # LED 발광 효과 (강한 glow)
-    led_glow = safe_gaussian_blur(text_layer_bgr, (35, 35), 15)
-    result = cv2.addWeighted(signboard_np, 0.5, led_glow, 0.8, 0)
-    result = cv2.add(result, text_layer_bgr)
-    
-    return result
-
 def render_flex_signboard(text: str, bg_color: str, text_color: str, logo_img: Image.Image = None, text_direction: str = "horizontal", width: int = 1200, height: int = 300) -> np.ndarray:
     """
     플렉스 간판: 천 재질
@@ -887,8 +857,8 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
             text_with_glow_3d = add_3d_depth(text_with_glow, depth=6)
         return day_result, text_with_glow_3d
     
-    elif sign_type in ["후광채널", "전후광채널", "LED채널"]:
-        # 발광 간판: 후광/전후광/LED
+    elif sign_type in ["후광채널", "전후광채널"]:
+        # 발광 간판: 후광/전후광
         text_layer_rgba = extract_text_layer(text_to_render, font, text_rgb, (width, height), position)
         text_layer_bgr = cv2.cvtColor(text_layer_rgba, cv2.COLOR_RGBA2BGR)
         
@@ -904,11 +874,6 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
             result = signboard_np.copy()
             result = cv2.add(result, text_layer_bgr)
             result = cv2.addWeighted(result, 1.0, text_glow, 0.5, 0)
-        elif sign_type == "LED채널":
-            # LED: 강한 발광
-            text_glow = safe_gaussian_blur(text_layer_bgr, (35, 35), 15)
-            signboard_np = cv2.add(signboard_np, text_glow)
-            result = cv2.add(signboard_np, text_layer_bgr)
         
         result = add_3d_depth(result, depth=6)
         
@@ -966,14 +931,11 @@ def render_signboard(text: str, logo_path: str, logo_type: str, installation_typ
     elif sign_type == "전후광채널":
         result, text_layer = render_combined_signboard(installation_type, "전후광채널", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height)
         return result, text_layer
-    elif sign_type == "LED채널":
-        result = render_combined_signboard(installation_type, "LED채널", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height)
-        return result, None
     elif sign_type == "스카시":
-        result = render_combined_signboard(installation_type, "스카시", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height)
+        result, _ = render_combined_signboard(installation_type, "스카시", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height)
         return result, None
     elif sign_type == "플렉스":
-        result = render_combined_signboard(installation_type, "플렉스", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height)
+        result, _ = render_combined_signboard(installation_type, "플렉스", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height)
         return result, None
     else:
         # 기본값: 전광채널
@@ -1222,9 +1184,6 @@ def composite_signboard(
                 # 이미지 업로드 방식: 전체 간판에 발광 효과
                 glow_intensity = 2.5
                 night_result = night_base * (1 - combined_mask) + warped_sign.astype(np.float32) * combined_mask * glow_intensity
-        elif sign_type == "LED채널":
-            glow_intensity = 3.0
-            night_result = night_base * (1 - combined_mask) + warped_sign.astype(np.float32) * combined_mask * glow_intensity
         elif sign_type == "플렉스":
             glow_intensity = 2.2  # 전체 발광
             night_result = night_base * (1 - combined_mask) + warped_sign.astype(np.float32) * combined_mask * glow_intensity
