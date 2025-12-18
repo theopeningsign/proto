@@ -6,33 +6,39 @@ import ResultViewer from './components/ResultViewer';
 
 function App() {
   const [buildingImage, setBuildingImage] = useState(null);
-  const [selectedArea, setSelectedArea] = useState(null);
-  const [formData, setFormData] = useState({
-    signboardInputType: 'text', // 'text' or 'image'
+  // 복수 간판 상태: 각 간판별 영역 + 옵션
+  const createDefaultFormData = () => ({
+    signboardInputType: 'text',
     text: '',
     logo: null,
     logoType: 'channel',
-    signboardImage: null, // 간판 이미지 (이미지 방식)
+    signboardImage: null,
     installationType: '맨벽',
     signType: '전광채널',
     bgColor: '#6B2D8F',
     textColor: '#FFFFFF',
     textDirection: 'horizontal',
     fontSize: 100,
-    originalFontSize: 100, // 원본 fontSize (간판 편집 박스 크기 계산용)
+    originalFontSize: 100,
     textPositionX: 50,
     textPositionY: 50,
-    orientation: 'auto', // 'auto', 'horizontal', 'vertical'
-    flipHorizontal: false, // 좌우반전
-    flipVertical: false, // 상하반전
-    rotate90: 0, // 0, 90, 180, 270
-    rotation: 0.0 // 회전 각도 (도 단위, -180 ~ 180)
+    orientation: 'auto',
+    flipHorizontal: false,
+    flipVertical: false,
+    rotate90: 0,
+    rotation: 0.0
   });
+
+  const [signboards, setSignboards] = useState([]); // {id, name, selectedArea, formData}
+  const [currentSignboardId, setCurrentSignboardId] = useState(null);
   const [lights, setLights] = useState([]);
   const [lightsEnabled, setLightsEnabled] = useState(true);
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(false);
   const isFirstRender = useRef(true);
+
+  const getCurrentSignboard = () =>
+    signboards.find((sb) => sb.id === currentSignboardId) || null;
 
   // 조명 켜기/끄기 시 자동 반영
   useEffect(() => {
@@ -57,19 +63,30 @@ function App() {
   };
 
   const handleGenerate = async () => {
-    if (!buildingImage || !selectedArea) {
-      alert('건물 사진을 업로드하고 간판 영역을 선택해주세요.');
+    if (!buildingImage) {
+      alert('건물 사진을 업로드해주세요.');
       return;
     }
 
-    if (formData.signboardInputType === 'text' && !formData.text.trim()) {
-      alert('상호명을 입력해주세요.');
+    if (!signboards.length) {
+      alert('간판을 하나 이상 추가하고 영역을 선택해주세요.');
       return;
     }
 
-    if (formData.signboardInputType === 'image' && !formData.signboardImage) {
-      alert('간판 이미지를 업로드해주세요.');
-      return;
+    // 각 간판별 유효성 검사
+    for (const sb of signboards) {
+      if (!sb.selectedArea) {
+        alert('모든 간판에 대해 간판 영역을 선택해주세요.');
+        return;
+      }
+      if (sb.formData.signboardInputType === 'text' && !sb.formData.text.trim()) {
+        alert('모든 간판의 상호명을 입력해주세요.');
+        return;
+      }
+      if (sb.formData.signboardInputType === 'image' && !sb.formData.signboardImage) {
+        alert('이미지 간판의 경우 간판 이미지를 업로드해주세요.');
+        return;
+      }
     }
 
     setLoading(true);
@@ -77,54 +94,97 @@ function App() {
     try {
       // 이미지를 base64로 변환
       const buildingBase64 = await imageToBase64(buildingImage);
-      let logoBase64 = '';
-      let signboardImageBase64 = '';
-      
-      if (formData.logo) {
-        logoBase64 = await imageToBase64(formData.logo);
+      const signboardsPayload = [];
+
+      for (const sb of signboards) {
+        const sbForm = sb.formData;
+
+        let logoBase64 = '';
+        let signboardImageBase64 = '';
+
+        if (sbForm.logo) {
+          logoBase64 = await imageToBase64(sbForm.logo);
+        }
+
+        if (sbForm.signboardImage) {
+          signboardImageBase64 = await imageToBase64(sbForm.signboardImage);
+        }
+
+        // 선택된 영역을 점 배열로 변환
+        let points;
+        if (sb.selectedArea.type === 'polygon') {
+          points = sb.selectedArea.points.map((p) => [p.x, p.y]);
+        } else {
+          points = [
+            [sb.selectedArea.x, sb.selectedArea.y],
+            [sb.selectedArea.x + sb.selectedArea.width, sb.selectedArea.y],
+            [sb.selectedArea.x + sb.selectedArea.width, sb.selectedArea.y + sb.selectedArea.height],
+            [sb.selectedArea.x, sb.selectedArea.y + sb.selectedArea.height]
+          ];
+        }
+
+        signboardsPayload.push({
+          polygon_points: points,
+          signboard_input_type: sbForm.signboardInputType,
+          text: sbForm.text || '',
+          logo: logoBase64,
+          signboard_image: signboardImageBase64,
+          installation_type: sbForm.installationType || '맨벽',
+          sign_type: sbForm.signType,
+          bg_color: sbForm.bgColor,
+          text_color: sbForm.textColor,
+          text_direction: sbForm.textDirection || 'horizontal',
+          font_size: parseInt(sbForm.fontSize) || 100,
+          text_position_x: parseInt(sbForm.textPositionX) || 50,
+          text_position_y: parseInt(sbForm.textPositionY) || 50,
+          logo_type: sbForm.logoType || 'channel',
+          orientation: sbForm.orientation || 'auto',
+          flip_horizontal: sbForm.flipHorizontal ? 'true' : 'false',
+          flip_vertical: sbForm.flipVertical ? 'true' : 'false',
+          rotate90: parseInt(sbForm.rotate90) || 0,
+          rotation: parseFloat(sbForm.rotation) || 0.0
+        });
       }
 
-      if (formData.signboardImage) {
-        signboardImageBase64 = await imageToBase64(formData.signboardImage);
-      }
-
-      // 선택된 영역을 점 배열로 변환
-      let points;
-      if (selectedArea.type === 'polygon') {
-        // 폴리곤: 점 배열 그대로 사용
-        points = selectedArea.points.map(p => [p.x, p.y]);
-      } else {
-        // 사각형 (하위 호환성)
-        points = [
-          [selectedArea.x, selectedArea.y],
-          [selectedArea.x + selectedArea.width, selectedArea.y],
-          [selectedArea.x + selectedArea.width, selectedArea.y + selectedArea.height],
-          [selectedArea.x, selectedArea.y + selectedArea.height]
-        ];
-      }
-
-      // API 호출
+      // API 호출 (복수 간판)
       const formDataToSend = new FormData();
       formDataToSend.append('building_photo', buildingBase64);
-      formDataToSend.append('polygon_points', JSON.stringify(points));
-      formDataToSend.append('signboard_input_type', formData.signboardInputType);
-      formDataToSend.append('text', formData.text || '');
-      formDataToSend.append('logo', logoBase64);
-      formDataToSend.append('signboard_image', signboardImageBase64);
-      formDataToSend.append('installation_type', formData.installationType || '맨벽');
-      formDataToSend.append('sign_type', formData.signType);
-      formDataToSend.append('bg_color', formData.bgColor);
-      formDataToSend.append('text_color', formData.textColor);
-      formDataToSend.append('text_direction', formData.textDirection || 'horizontal');
-      formDataToSend.append('font_size', String(parseInt(formData.fontSize) || 100));
-      formDataToSend.append('text_position_x', String(parseInt(formData.textPositionX) || 50));
-      formDataToSend.append('text_position_y', String(parseInt(formData.textPositionY) || 50));
-      formDataToSend.append('logo_type', formData.logoType || 'channel');
-      formDataToSend.append('orientation', formData.orientation || 'auto');
-      formDataToSend.append('flip_horizontal', formData.flipHorizontal ? 'true' : 'false');
-      formDataToSend.append('flip_vertical', formData.flipVertical ? 'true' : 'false');
-      formDataToSend.append('rotate90', String(parseInt(formData.rotate90) || 0));
-      formDataToSend.append('rotation', String(parseFloat(formData.rotation) || 0.0));
+      // 기존 백엔드 시그니처 유지용 (첫 간판 폴리곤 전달, 실제 처리는 signboards에서)
+      const firstArea = signboards[0].selectedArea;
+      let firstPoints;
+      if (firstArea.type === 'polygon') {
+        firstPoints = firstArea.points.map((p) => [p.x, p.y]);
+      } else {
+        firstPoints = [
+          [firstArea.x, firstArea.y],
+          [firstArea.x + firstArea.width, firstArea.y],
+          [firstArea.x + firstArea.width, firstArea.y + firstArea.height],
+          [firstArea.x, firstArea.y + firstArea.height]
+        ];
+      }
+      formDataToSend.append('polygon_points', JSON.stringify(firstPoints));
+      formDataToSend.append('signboards', JSON.stringify(signboardsPayload));
+
+      // 백엔드 기존 시그니처 유지를 위해 첫 번째 간판 정보를 함께 전송
+      const firstForm = signboards[0].formData;
+      formDataToSend.append('signboard_input_type', firstForm.signboardInputType);
+      formDataToSend.append('text', firstForm.text || '');
+      formDataToSend.append('logo', signboardsPayload[0].logo || '');
+      formDataToSend.append('signboard_image', signboardsPayload[0].signboard_image || '');
+      formDataToSend.append('installation_type', firstForm.installationType || '맨벽');
+      formDataToSend.append('sign_type', firstForm.signType);
+      formDataToSend.append('bg_color', firstForm.bgColor);
+      formDataToSend.append('text_color', firstForm.textColor);
+      formDataToSend.append('text_direction', firstForm.textDirection || 'horizontal');
+      formDataToSend.append('font_size', String(parseInt(firstForm.fontSize) || 100));
+      formDataToSend.append('text_position_x', String(parseInt(firstForm.textPositionX) || 50));
+      formDataToSend.append('text_position_y', String(parseInt(firstForm.textPositionY) || 50));
+      formDataToSend.append('logo_type', firstForm.logoType || 'channel');
+      formDataToSend.append('orientation', firstForm.orientation || 'auto');
+      formDataToSend.append('flip_horizontal', firstForm.flipHorizontal ? 'true' : 'false');
+      formDataToSend.append('flip_vertical', firstForm.flipVertical ? 'true' : 'false');
+      formDataToSend.append('rotate90', String(parseInt(firstForm.rotate90) || 0));
+      formDataToSend.append('rotation', String(parseFloat(firstForm.rotation) || 0.0));
       formDataToSend.append('lights', JSON.stringify(lights || []));
       formDataToSend.append('lights_enabled', lightsEnabled ? 'true' : 'false');
       
@@ -190,13 +250,93 @@ function App() {
             <ImageUploader
               image={buildingImage}
               onImageUpload={setBuildingImage}
-              selectedArea={selectedArea}
-              onAreaChange={setSelectedArea}
+              selectedArea={getCurrentSignboard()?.selectedArea || null}
+              onAreaChange={(area) => {
+                if (currentSignboardId === null) {
+                  // 첫 간판 생성
+                  const newId = Date.now();
+                  const newSignboard = {
+                    id: newId,
+                    name: `간판 1`,
+                    selectedArea: area,
+                    formData: createDefaultFormData()
+                  };
+                  setSignboards([newSignboard]);
+                  setCurrentSignboardId(newId);
+                } else {
+                  setSignboards((prev) =>
+                    prev.map((sb) =>
+                      sb.id === currentSignboardId ? { ...sb, selectedArea: area } : sb
+                    )
+                  );
+                }
+              }}
+              signboards={signboards.map((sb) => ({
+                id: sb.id,
+                selectedArea: sb.selectedArea
+              }))}
+              currentSignboardId={currentSignboardId}
             />
             
+            {/* 간판 선택/추가 탭 */}
+            <div className="bg-white/5 border border-white/10 rounded-xl p-3 flex items-center justify-between">
+              <div className="flex flex-wrap gap-2">
+                {signboards.map((sb, idx) => (
+                  <button
+                    key={sb.id}
+                    type="button"
+                    onClick={() => setCurrentSignboardId(sb.id)}
+                    className={`px-3 py-1 rounded-lg text-xs border transition-colors ${
+                      currentSignboardId === sb.id
+                        ? 'bg-blue-500 border-blue-400 text-white'
+                        : 'bg-black/40 border-white/20 text-gray-200 hover:border-blue-400'
+                    }`}
+                  >
+                    {sb.name || `간판 ${idx + 1}`}
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  const newId = Date.now();
+                  const newIndex = signboards.length + 1;
+                  const newSignboard = {
+                    id: newId,
+                    name: `간판 ${newIndex}`,
+                    selectedArea: null,
+                    formData: createDefaultFormData()
+                  };
+                  setSignboards((prev) => [...prev, newSignboard]);
+                  setCurrentSignboardId(newId);
+                }}
+                className="px-3 py-1 rounded-lg text-xs bg-emerald-500/80 hover:bg-emerald-500 text-white"
+              >
+                + 간판 추가
+              </button>
+            </div>
+
             <SignboardForm
-              formData={formData}
-              onFormDataChange={setFormData}
+              formData={getCurrentSignboard()?.formData || createDefaultFormData()}
+              onFormDataChange={(updated) => {
+                if (currentSignboardId === null) {
+                  const newId = Date.now();
+                  const newSignboard = {
+                    id: newId,
+                    name: `간판 1`,
+                    selectedArea: null,
+                    formData: updated
+                  };
+                  setSignboards([newSignboard]);
+                  setCurrentSignboardId(newId);
+                } else {
+                  setSignboards((prev) =>
+                    prev.map((sb) =>
+                      sb.id === currentSignboardId ? { ...sb, formData: updated } : sb
+                    )
+                  );
+                }
+              }}
               section="basic"
             />
           </motion.div>
@@ -222,82 +362,125 @@ function App() {
               lightsEnabled={lightsEnabled}
               onToggleEnabled={setLightsEnabled}
               onApplyLights={handleApplyLights}
-              originalSignboards={[{ id: 0, formData }]}
-              selectedArea={selectedArea}
+              signboards={signboards}
               onRegenerateWithTransforms={async (transforms) => {
-                if (!buildingImage || !selectedArea) return;
+                if (!buildingImage || !signboards.length) return;
                 setLoading(true);
                 try {
                   const buildingBase64 = await imageToBase64(buildingImage);
-                  let logoBase64 = '';
-                  if (formData.logo) logoBase64 = await imageToBase64(formData.logo);
-                  let signboardImageBase64 = '';
-                  if (formData.signboardImage) signboardImageBase64 = await imageToBase64(formData.signboardImage);
-                  
-                  let points;
-                  if (selectedArea.type === 'polygon') {
-                    points = selectedArea.points.map(p => [p.x, p.y]);
-                  } else {
-                    points = [
-                      [selectedArea.x, selectedArea.y],
-                      [selectedArea.x + selectedArea.width, selectedArea.y],
-                      [selectedArea.x + selectedArea.width, selectedArea.y + selectedArea.height],
-                      [selectedArea.x, selectedArea.y + selectedArea.height]
-                    ];
-                  }
-
-                  const updatedFormData = { ...formData };
-                  // transforms는 배열 형태로 전달됨
-                  if (Array.isArray(transforms) && transforms.length > 0) {
-                    const transform = transforms[0];
-                    if (transform) {
-                      if (transform.fontSize !== undefined) {
-                        // fontSize만 업데이트하고, originalFontSize는 유지
-                        // originalFontSize는 처음 설정된 기준값으로 유지되어야 함
-                        // (다음에 간판 편집을 열 때 originalFontSize 대비 fontSize 비율로 박스 크기 계산)
-                        updatedFormData.fontSize = transform.fontSize;
-                        // originalFontSize는 변경하지 않음 (기존 값 유지)
-                      }
-                      // 간판 영역 내 텍스트 위치(0-100%) 업데이트
-                      if (transform.textPositionX !== undefined) {
-                        updatedFormData.textPositionX = transform.textPositionX;
-                      }
-                      if (transform.textPositionY !== undefined) {
-                        updatedFormData.textPositionY = transform.textPositionY;
-                      }
-                      // rotation 값을 rotate90으로 변환 (90도 단위로만 지원하는 경우)
-                      // 또는 rotation 파라미터로 직접 전달
-                      if (transform.rotation !== undefined) {
-                        // rotation을 그대로 전달 (백엔드에서 처리)
-                        updatedFormData.rotation = transform.rotation;
-                        console.log('[회전 적용] rotation 값 설정:', transform.rotation);
-                      }
+                  // transforms: [{id, ...transform}]
+                  const updatedSignboards = signboards.map((sb) => {
+                    const t = Array.isArray(transforms)
+                      ? transforms.find((tr) => tr.id === sb.id)
+                      : null;
+                    if (!t) return sb;
+                    const updatedFormData = { ...sb.formData };
+                    if (t.fontSize !== undefined) {
+                      updatedFormData.fontSize = t.fontSize;
                     }
+                    if (t.textPositionX !== undefined) {
+                      updatedFormData.textPositionX = t.textPositionX;
+                    }
+                    if (t.textPositionY !== undefined) {
+                      updatedFormData.textPositionY = t.textPositionY;
+                    }
+                    if (t.rotation !== undefined) {
+                      updatedFormData.rotation = t.rotation;
+                    }
+                    return { ...sb, formData: updatedFormData };
+                  });
+
+                  setSignboards(updatedSignboards);
+
+                  // 백엔드로 전송할 signboardsPayload 재구성
+                  const signboardsPayload = [];
+
+                  for (const sb of updatedSignboards) {
+                    const sbForm = sb.formData;
+
+                    let logoBase64 = '';
+                    let signboardImageBase64 = '';
+
+                    if (sbForm.logo) {
+                      logoBase64 = await imageToBase64(sbForm.logo);
+                    }
+                    if (sbForm.signboardImage) {
+                      signboardImageBase64 = await imageToBase64(sbForm.signboardImage);
+                    }
+
+                    let points;
+                    if (sb.selectedArea.type === 'polygon') {
+                      points = sb.selectedArea.points.map((p) => [p.x, p.y]);
+                    } else {
+                      points = [
+                        [sb.selectedArea.x, sb.selectedArea.y],
+                        [sb.selectedArea.x + sb.selectedArea.width, sb.selectedArea.y],
+                        [sb.selectedArea.x + sb.selectedArea.width, sb.selectedArea.y + sb.selectedArea.height],
+                        [sb.selectedArea.x, sb.selectedArea.y + sb.selectedArea.height]
+                      ];
+                    }
+
+                    signboardsPayload.push({
+                      polygon_points: points,
+                      signboard_input_type: sbForm.signboardInputType,
+                      text: sbForm.text || '',
+                      logo: logoBase64,
+                      signboard_image: signboardImageBase64,
+                      installation_type: sbForm.installationType || '맨벽',
+                      sign_type: sbForm.signType,
+                      bg_color: sbForm.bgColor,
+                      text_color: sbForm.textColor,
+                      text_direction: sbForm.textDirection || 'horizontal',
+                      font_size: parseInt(sbForm.fontSize) || 100,
+                      text_position_x: parseInt(sbForm.textPositionX) || 50,
+                      text_position_y: parseInt(sbForm.textPositionY) || 50,
+                      logo_type: sbForm.logoType || 'channel',
+                      orientation: sbForm.orientation || 'auto',
+                      flip_horizontal: sbForm.flipHorizontal ? 'true' : 'false',
+                      flip_vertical: sbForm.flipVertical ? 'true' : 'false',
+                      rotate90: parseInt(sbForm.rotate90) || 0,
+                      rotation: parseFloat(sbForm.rotation) || 0.0
+                    });
                   }
 
                   const formDataToSend = new FormData();
                   formDataToSend.append('building_photo', buildingBase64);
-                  formDataToSend.append('polygon_points', JSON.stringify(points));
-                  formDataToSend.append('signboard_input_type', updatedFormData.signboardInputType);
-                  formDataToSend.append('text', updatedFormData.text || '');
-                  formDataToSend.append('logo', logoBase64);
-                  formDataToSend.append('signboard_image', signboardImageBase64);
-                  formDataToSend.append('installation_type', updatedFormData.installationType || '맨벽');
-                  formDataToSend.append('sign_type', updatedFormData.signType);
-                  formDataToSend.append('bg_color', updatedFormData.bgColor);
-                  formDataToSend.append('text_color', updatedFormData.textColor);
-                  formDataToSend.append('text_direction', updatedFormData.textDirection || 'horizontal');
-                  formDataToSend.append('font_size', String(parseInt(updatedFormData.fontSize) || 100));
-                  formDataToSend.append('text_position_x', String(parseInt(updatedFormData.textPositionX) || 50));
-                  formDataToSend.append('text_position_y', String(parseInt(updatedFormData.textPositionY) || 50));
-                  formDataToSend.append('logo_type', updatedFormData.logoType || 'channel');
-                  formDataToSend.append('orientation', updatedFormData.orientation || 'auto');
-                  formDataToSend.append('flip_horizontal', updatedFormData.flipHorizontal ? 'true' : 'false');
-                  formDataToSend.append('flip_vertical', updatedFormData.flipVertical ? 'true' : 'false');
-                  formDataToSend.append('rotate90', String(parseInt(updatedFormData.rotate90) || 0));
-                  const rotationValue = updatedFormData.rotation !== undefined ? parseFloat(updatedFormData.rotation) : 0.0;
+                  const firstArea = updatedSignboards[0].selectedArea;
+                  let firstPoints;
+                  if (firstArea.type === 'polygon') {
+                    firstPoints = firstArea.points.map((p) => [p.x, p.y]);
+                  } else {
+                    firstPoints = [
+                      [firstArea.x, firstArea.y],
+                      [firstArea.x + firstArea.width, firstArea.y],
+                      [firstArea.x + firstArea.width, firstArea.y + firstArea.height],
+                      [firstArea.x, firstArea.y + firstArea.height]
+                    ];
+                  }
+                  formDataToSend.append('polygon_points', JSON.stringify(firstPoints));
+                  formDataToSend.append('signboards', JSON.stringify(signboardsPayload));
+
+                  // 백엔드 기존 시그니처 유지를 위해 첫 번째 간판 정보를 함께 전송
+                  const firstForm = updatedSignboards[0].formData;
+                  formDataToSend.append('signboard_input_type', firstForm.signboardInputType);
+                  formDataToSend.append('text', firstForm.text || '');
+                  formDataToSend.append('logo', signboardsPayload[0].logo || '');
+                  formDataToSend.append('signboard_image', signboardsPayload[0].signboard_image || '');
+                  formDataToSend.append('installation_type', firstForm.installationType || '맨벽');
+                  formDataToSend.append('sign_type', firstForm.signType);
+                  formDataToSend.append('bg_color', firstForm.bgColor);
+                  formDataToSend.append('text_color', firstForm.textColor);
+                  formDataToSend.append('text_direction', firstForm.textDirection || 'horizontal');
+                  formDataToSend.append('font_size', String(parseInt(firstForm.fontSize) || 100));
+                  formDataToSend.append('text_position_x', String(parseInt(firstForm.textPositionX) || 50));
+                  formDataToSend.append('text_position_y', String(parseInt(firstForm.textPositionY) || 50));
+                  formDataToSend.append('logo_type', firstForm.logoType || 'channel');
+                  formDataToSend.append('orientation', firstForm.orientation || 'auto');
+                  formDataToSend.append('flip_horizontal', firstForm.flipHorizontal ? 'true' : 'false');
+                  formDataToSend.append('flip_vertical', firstForm.flipVertical ? 'true' : 'false');
+                  formDataToSend.append('rotate90', String(parseInt(firstForm.rotate90) || 0));
+                  const rotationValue = firstForm.rotation !== undefined ? parseFloat(firstForm.rotation) : 0.0;
                   formDataToSend.append('rotation', String(rotationValue));
-                  console.log('[회전 전송] rotation 값:', rotationValue, 'updatedFormData.rotation:', updatedFormData.rotation);
                   formDataToSend.append('lights', JSON.stringify(lights || []));
                   formDataToSend.append('lights_enabled', lightsEnabled ? 'true' : 'false');
 
@@ -322,78 +505,6 @@ function App() {
                   
                   console.log('[API 응답] 성공적으로 받음');
                   setResults(data);
-                  setFormData(updatedFormData);
-                } catch (error) {
-                  console.error('Error:', error);
-                  alert('오류가 발생했습니다: ' + error.message);
-                } finally {
-                  setLoading(false);
-                }
-              }}
-              onApplyTextPositions={async (textPositions) => {
-                if (!buildingImage || !selectedArea) return;
-                setLoading(true);
-                try {
-                  const buildingBase64 = await imageToBase64(buildingImage);
-                  let logoBase64 = '';
-                  if (formData.logo) logoBase64 = await imageToBase64(formData.logo);
-                  let signboardImageBase64 = '';
-                  if (formData.signboardImage) signboardImageBase64 = await imageToBase64(formData.signboardImage);
-                  
-                  let points;
-                  if (selectedArea.type === 'polygon') {
-                    points = selectedArea.points.map(p => [p.x, p.y]);
-                  } else {
-                    points = [
-                      [selectedArea.x, selectedArea.y],
-                      [selectedArea.x + selectedArea.width, selectedArea.y],
-                      [selectedArea.x + selectedArea.width, selectedArea.y + selectedArea.height],
-                      [selectedArea.x, selectedArea.y + selectedArea.height]
-                    ];
-                  }
-
-                  const updatedFormData = { ...formData };
-                  if (textPositions[0]) {
-                    updatedFormData.textPositionX = textPositions[0].x;
-                    updatedFormData.textPositionY = textPositions[0].y;
-                  }
-
-                  const formDataToSend = new FormData();
-                  formDataToSend.append('building_photo', buildingBase64);
-                  formDataToSend.append('polygon_points', JSON.stringify(points));
-                  formDataToSend.append('signboard_input_type', updatedFormData.signboardInputType);
-                  formDataToSend.append('text', updatedFormData.text || '');
-                  formDataToSend.append('logo', logoBase64);
-                  formDataToSend.append('signboard_image', signboardImageBase64);
-                  formDataToSend.append('installation_type', updatedFormData.installationType || '맨벽');
-                  formDataToSend.append('sign_type', updatedFormData.signType);
-                  formDataToSend.append('bg_color', updatedFormData.bgColor);
-                  formDataToSend.append('text_color', updatedFormData.textColor);
-                  formDataToSend.append('text_direction', updatedFormData.textDirection || 'horizontal');
-                  formDataToSend.append('font_size', String(parseInt(updatedFormData.fontSize) || 100));
-                  formDataToSend.append('text_position_x', String(parseInt(updatedFormData.textPositionX) || 50));
-                  formDataToSend.append('text_position_y', String(parseInt(updatedFormData.textPositionY) || 50));
-                  formDataToSend.append('logo_type', updatedFormData.logoType || 'channel');
-                  formDataToSend.append('orientation', updatedFormData.orientation || 'auto');
-                  formDataToSend.append('flip_horizontal', updatedFormData.flipHorizontal ? 'true' : 'false');
-                  formDataToSend.append('flip_vertical', updatedFormData.flipVertical ? 'true' : 'false');
-                  formDataToSend.append('rotate90', String(parseInt(updatedFormData.rotate90) || 0));
-                  const rotationValue = updatedFormData.rotation !== undefined ? parseFloat(updatedFormData.rotation) : 0.0;
-                  formDataToSend.append('rotation', String(rotationValue));
-                  console.log('[회전 전송] rotation 값:', rotationValue, 'updatedFormData.rotation:', updatedFormData.rotation);
-                  formDataToSend.append('lights', JSON.stringify(lights || []));
-                  formDataToSend.append('lights_enabled', lightsEnabled ? 'true' : 'false');
-
-                  const response = await fetch('http://localhost:8000/api/generate-simulation', {
-                    method: 'POST',
-                    body: formDataToSend
-                  });
-
-                  const data = await response.json();
-                  if (data.error) throw new Error(data.error);
-                  
-                  setResults(data);
-                  setFormData(updatedFormData);
                 } catch (error) {
                   console.error('Error:', error);
                   alert('오류가 발생했습니다: ' + error.message);
@@ -404,8 +515,26 @@ function App() {
             />
             
             <SignboardForm
-              formData={formData}
-              onFormDataChange={setFormData}
+              formData={getCurrentSignboard()?.formData || createDefaultFormData()}
+              onFormDataChange={(updated) => {
+                if (currentSignboardId === null) {
+                  const newId = Date.now();
+                  const newSignboard = {
+                    id: newId,
+                    name: `간판 1`,
+                    selectedArea: null,
+                    formData: updated
+                  };
+                  setSignboards([newSignboard]);
+                  setCurrentSignboardId(newId);
+                } else {
+                  setSignboards((prev) =>
+                    prev.map((sb) =>
+                      sb.id === currentSignboardId ? { ...sb, formData: updated } : sb
+                    )
+                  );
+                }
+              }}
               section="advanced"
             />
           </motion.div>

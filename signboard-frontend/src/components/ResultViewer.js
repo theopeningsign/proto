@@ -2,18 +2,29 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import SignboardTransform from './SignboardTransform';
 
-const ResultViewer = ({ results, loading, lights = [], onLightsChange = () => {}, lightsEnabled = true, onToggleEnabled = () => {}, onApplyLights = () => {}, originalSignboards = [], onRegenerateWithTransforms = () => {}, onApplyTextPositions = () => {}, selectedArea = null, textSizeInfo = null }) => {
+const ResultViewer = ({
+  results,
+  loading,
+  lights = [],
+  onLightsChange = () => {},
+  lightsEnabled = true,
+  onToggleEnabled = () => {},
+  onApplyLights = () => {},
+  signboards = [],
+  onRegenerateWithTransforms = () => {},
+  textSizeInfo = null
+}) => {
   const [viewMode, setViewMode] = useState('day'); // 'day' | 'night'
   const [selectedLightId, setSelectedLightId] = useState(null);
   const [showTransform, setShowTransform] = useState(false);
   const [imageSize, setImageSize] = useState({ width: 1, height: 1 });
   const containerRef = useRef(null);
   const draggingRef = useRef(null);
-  const originalSignboardsRef = useRef(originalSignboards);
+  const originalSignboardsRef = useRef(signboards);
   const imageRef = useRef(null);
   const scaleRef = useRef(1);
   const offsetRef = useRef({ x: 0, y: 0 });
-  const selectedAreaRef = useRef(selectedArea);
+  const selectedAreaRef = useRef(null);
   const imageSizeRef = useRef(imageSize);
   const textSizeInfoRef = useRef(textSizeInfo);
   
@@ -187,13 +198,12 @@ const ResultViewer = ({ results, loading, lights = [], onLightsChange = () => {}
     };
   }, [scale, offset, results, handleWheel]);
 
-  // originalSignboards를 ref로 저장하여 클로저 문제 방지
+  // signboards를 ref로 저장하여 클로저 문제 방지
   useEffect(() => {
-    originalSignboardsRef.current = originalSignboards;
-    selectedAreaRef.current = selectedArea;
+    originalSignboardsRef.current = signboards;
     scaleRef.current = scale;
     offsetRef.current = offset;
-  }, [originalSignboards, selectedArea, scale, offset]);
+  }, [signboards, scale, offset]);
   // originalSignboards를 ref로 저장하여 클로저 문제 방지
   const [pendingTransforms, setPendingTransforms] = useState({});
 
@@ -371,7 +381,7 @@ const ResultViewer = ({ results, loading, lights = [], onLightsChange = () => {}
             }}
           />
           {/* 간판 편집 오버레이 (상호 위치 편집 포함) */}
-          {showTransform && originalSignboards.length > 0 && (
+          {showTransform && signboards.length > 0 && (
             <div 
               className="absolute inset-0 pointer-events-none" 
               style={{ 
@@ -381,11 +391,14 @@ const ResultViewer = ({ results, loading, lights = [], onLightsChange = () => {}
               }}
             >
               {/* 간판편집 모드에서도 간판 영역(처음 설정한 영역)을 노란 박스로 표시 */}
-              {selectedArea && (() => {
+              {/* 각 간판의 원래 영역(노란 박스) 표시 */}
+              {signboards.map((sb) => {
+                if (!sb.selectedArea) return null;
+                const selectedArea = sb.selectedArea;
                 let signboardX, signboardY, signboardWidth, signboardHeight;
                 if (selectedArea.type === 'polygon' && selectedArea.points.length >= 4) {
-                  const xs = selectedArea.points.map(p => p.x);
-                  const ys = selectedArea.points.map(p => p.y);
+                  const xs = selectedArea.points.map((p) => p.x);
+                  const ys = selectedArea.points.map((p) => p.y);
                   signboardX = Math.min(...xs);
                   signboardY = Math.min(...ys);
                   signboardWidth = Math.max(...xs) - signboardX;
@@ -404,38 +417,52 @@ const ResultViewer = ({ results, loading, lights = [], onLightsChange = () => {}
 
                 return (
                   <div
+                    key={`area-${sb.id}`}
                     className="absolute pointer-events-none"
                     style={{
                       left: `${signboardXPercent}%`,
                       top: `${signboardYPercent}%`,
                       width: `${signboardWidthPercent}%`,
                       height: `${signboardHeightPercent}%`,
-                      border: '2px dashed rgba(255, 255, 0, 0.6)', // 노란색 점선 테두리
-                      backgroundColor: 'rgba(255, 255, 0, 0.1)', // 반투명 노란색 배경
+                      border: '2px dashed rgba(255, 255, 0, 0.6)',
+                      backgroundColor: 'rgba(255, 255, 0, 0.1)',
                       borderRadius: '4px',
-                      boxShadow: '0 0 0 2px rgba(255, 255, 255, 0.3)',
+                      boxShadow: '0 0 0 2px rgba(255, 255, 255, 0.3)'
                     }}
                     title="처음 설정한 간판 영역"
                   />
                 );
-              })()}
+              })}
 
               <SignboardTransform
-                key={`${originalSignboards[0]?.formData?.fontSize || 100}-${originalSignboards[0]?.formData?.rotation || 0}`}
-                signboards={originalSignboards.map((sb, idx) => ({
-                  id: idx,
-                  polygon_points: selectedArea ? (selectedArea.type === 'polygon' 
-                    ? selectedArea.points.map(p => [p.x, p.y])
-                    : [[selectedArea.x, selectedArea.y], 
-                       [selectedArea.x + selectedArea.width, selectedArea.y],
-                       [selectedArea.x + selectedArea.width, selectedArea.y + selectedArea.height],
-                       [selectedArea.x, selectedArea.y + selectedArea.height]])
-                    : [],
-                  text: sb.formData?.text || ''
-                }))}
-                originalSignboards={originalSignboards}
+                key={signboards.map((sb) => `${sb.id}-${sb.formData?.fontSize || 100}-${sb.formData?.rotation || 0}`).join('|')}
+                signboards={signboards.map((sb) => {
+                  if (!sb.selectedArea) {
+                    return {
+                      id: sb.id,
+                      polygon_points: [],
+                      text: sb.formData?.text || ''
+                    };
+                  }
+                  const a = sb.selectedArea;
+                  const points =
+                    a.type === 'polygon'
+                      ? a.points.map((p) => [p.x, p.y])
+                      : [
+                          [a.x, a.y],
+                          [a.x + a.width, a.y],
+                          [a.x + a.width, a.y + a.height],
+                          [a.x, a.y + a.height]
+                        ];
+                  return {
+                    id: sb.id,
+                    polygon_points: points,
+                    text: sb.formData?.text || ''
+                  };
+                })}
+                originalSignboards={signboards}
                 imageSize={imageSize}
-                selectedArea={selectedArea}
+                selectedArea={null}
                 textSizeInfo={textSizeInfo}
                 onTransformChange={setPendingTransforms}
                 onApply={handleApplyTransforms}

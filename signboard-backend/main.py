@@ -734,30 +734,29 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
     text_height = bbox[3] - bbox[1]
     
     # text_position_x, text_position_y 사용 (간판 내에서의 위치, 0-100%)
-    # text_position_x: 0 = 왼쪽, 50 = 중앙, 100 = 오른쪽 (텍스트 중심 기준)
-    # text_position_y: 0 = 위, 50 = 중앙, 100 = 아래 (텍스트 중심 기준)
-    
-    # 텍스트 중심 위치 계산
-    # text_position_x가 0이면 텍스트 중심이 간판 왼쪽 끝 + text_width/2
-    # text_position_x가 50이면 텍스트 중심이 간판 중앙
-    # text_position_x가 100이면 텍스트 중심이 간판 오른쪽 끝 - text_width/2
-    if logo_img:
-        # 로고가 있으면 기본적으로 오른쪽으로, 하지만 text_position_x 우선
-        if text_position_x == 50:  # 기본값이면 오른쪽으로
-            text_center_x = int(width * 0.55)
-        else:
-            # 간판 왼쪽 끝 + (간판 너비 - 텍스트 너비) * (text_position_x / 100) + 텍스트 너비/2
-            text_center_x = int(text_width / 2 + (width - text_width) * (text_position_x / 100))
+    # 0% ~ 100% 를 간판 영역 전체에 가깝게 사용하도록 재매핑
+    text_pos_x_clamped = max(0, min(100, text_position_x))
+    text_pos_y_clamped = max(0, min(100, text_position_y))
+
+    # 최소 패딩: 텍스트가 잘리지 않도록 약간의 여백
+    min_padding_y = int(height * 0.05)
+    min_padding_x = int(width * 0.05)
+
+    # 세로 방향 사용 가능 영역 (텍스트 실제 높이 고려)
+    usable_height = height - (min_padding_y * 2) - text_height
+    if usable_height < 0:
+        # 텍스트가 너무 큰 경우: 중앙 고정
+        y_offset = (height - text_height) // 2
     else:
-        # 텍스트 중심 위치 계산
-        text_center_x = int(text_width / 2 + (width - text_width) * (text_position_x / 100))
-    
-    # 세로 위치도 텍스트 중심 기준
-    text_center_y = int(text_height / 2 + (height - text_height) * (text_position_y / 100))
-    
-    # 텍스트 왼쪽 위 모서리 위치 (PIL의 text 위치는 왼쪽 위 기준)
-    x_offset = text_center_x - text_width // 2
-    y_offset = text_center_y - text_height // 2
+        y_offset = min_padding_y + int((text_pos_y_clamped / 100.0) * usable_height)
+
+    # 가로 방향 사용 가능 영역 (텍스트 실제 너비 고려)
+    usable_width = width - (min_padding_x * 2) - text_width
+    if usable_width < 0:
+        x_offset = (width - text_width) // 2
+    else:
+        # 로고가 있는 경우에도 text_position_x 를 그대로 사용 (로고 위치는 별도로 조정)
+        x_offset = min_padding_x + int((text_pos_x_clamped / 100.0) * usable_width)
     
     position = (x_offset, y_offset)
     
@@ -909,7 +908,18 @@ def order_points(pts):
     
     return np.array([top_left, top_right, bottom_right, bottom_left], dtype=np.float32)
 
-def composite_signboard(building_photo: np.ndarray, signboard_image: np.ndarray, polygon_points: list, sign_type: str = "", text_layer: np.ndarray = None, lights: list = None, lights_enabled: bool = True) -> tuple:
+def composite_signboard(
+    building_photo: np.ndarray,
+    signboard_image: np.ndarray,
+    polygon_points: list,
+    sign_type: str = "",
+    text_layer: np.ndarray = None,
+    lights: list = None,
+    lights_enabled: bool = True,
+    # 멀티 간판용: 이미 어둡게 처리된 야간 이미지를 다시 어둡게 하지 않도록 제어
+    building_photo_night: np.ndarray = None,
+    pre_darkened: bool = False,
+) -> tuple:
     """이미지 합성 - 주간/야간 버전 생성 (폴리곤 지원)
     text_layer: 전광채널의 경우 텍스트만 분리된 레이어 (None이면 전체 간판 사용)
     """
@@ -991,12 +1001,18 @@ def composite_signboard(building_photo: np.ndarray, signboard_image: np.ndarray,
     day_result = day_result.astype(np.uint8)
     
     # 야간 버전: 배경 어둡게
-    night_base = building_photo.copy().astype(np.float32) * 0.25  # 전체 배경 어둡게
+    # building_photo_night가 주어지면 그걸 기준으로 사용 (멀티 간판에서 이미 어둡게 된 야간 이미지)
+    night_src = building_photo_night if building_photo_night is not None else building_photo
+    if pre_darkened:
+        # 이미 한 번 어둡게 처리된 야간 이미지 위에 추가 합성
+        night_base = night_src.copy().astype(np.float32)
+    else:
+        night_base = night_src.copy().astype(np.float32) * 0.25  # 전체 배경 어둡게
     
     # 검은색 부분 투명도 처리 (야간에도 적용)
     # gray_sign과 transparency_mask는 이미 위에서 계산됨
     
-    # 전광채널의 경우: 배경은 어둡게 유지, 글자는 주간 밝기 그대로
+    # 전광채널의 경우: 배경은 어둡게 유지, 글자는 주간 밝기 그대로 (멀티 간판에서도 일관되게 보이도록)
     if sign_type == "전광채널" and text_layer is not None:
         # 배경 레이어 추출 (간판에서 텍스트 제외)
         bg_layer = signboard_image.copy()
@@ -1026,9 +1042,11 @@ def composite_signboard(building_photo: np.ndarray, signboard_image: np.ndarray,
         # 배경을 어둡게 유지 (주간 배경에 야간 효과 적용)
         warped_bg_dark = warped_bg.astype(np.float32) * 0.25
 
-        # 야간: 배경(선택영역)은 어둡게, 텍스트는 주간 밝기 그대로 (추가 발광 없음)
-        # combined_mask 사용 (투명도 고려)
-        night_result = night_base * (1 - combined_mask) + warped_bg_dark * combined_mask + warped_text.astype(np.float32) * text_mask_warped * transparency_mask
+        # 야간: 배경(선택영역)은 어둡게, 텍스트는 주간 밝기 그대로
+        # 멀티 간판에서도 글자 밝기가 눌리지 않도록, 텍스트는 night_base/배경과의 최댓값으로 합성
+        base_night = night_base * (1 - combined_mask) + warped_bg_dark * combined_mask
+        text_contrib = warped_text.astype(np.float32) * text_mask_warped * transparency_mask
+        night_result = np.maximum(base_night, text_contrib)
     else:
         # 다른 간판 종류: 전체 간판에 발광 강도 적용
         if sign_type == "후광채널":
@@ -1206,9 +1224,232 @@ async def generate_simulation(
     rotate90: int = Form(0),
     rotation: float = Form(0.0),  # 회전 각도 (도 단위, -180 ~ 180)
     lights: str = Form("[]"),
-    lights_enabled: str = Form("true")
+    lights_enabled: str = Form("true"),
+    # 복수 간판용: 프론트에서 JSON 문자열로 전달
+    signboards: str = Form(None)
 ):
     try:
+        # 진입 로그 (복수 간판 디버깅용)
+        log_error(f"[ENTRY] signboards raw: {str(signboards)[:200]}")
+
+        # Base64 이미지 디코딩
+        building_img = base64_to_image(building_photo)
+
+        # 조명 정보 파싱
+        lights_list = json.loads(lights) if lights else []
+        lights_on = lights_enabled.lower() != "false"
+        
+        print(f"[DEBUG] lights_enabled 값: {lights_enabled}")
+        print(f"[DEBUG] lights_on 계산 결과: {lights_on}")
+        print(f"[DEBUG] lights_list: {lights_list}")
+        print(f"[DEBUG] lights_list 길이: {len(lights_list)}")
+
+        # 복수 간판 모드: signboards JSON이 전달된 경우
+        if signboards:
+            try:
+                signboards_data = json.loads(signboards)
+            except Exception as e:
+                log_error("[ERROR] signboards JSON 파싱 실패", e)
+                return JSONResponse(status_code=400, content={"error": "잘못된 signboards 형식입니다."})
+
+            log_error(f"[MULTI] 전달된 간판 개수: {len(signboards_data)}")
+
+            current_day = building_img.copy()
+            current_night = None
+
+            # 여러 간판을 순차적으로 합성 (앞에서부터 쌓아가기)
+            for idx, sb in enumerate(signboards_data):
+                try:
+                    sb_points = sb.get("polygon_points", [])
+                    if not sb_points:
+                        log_error(f"[MULTI] index={idx} 폴리곤 없음, 스킵")
+                        continue
+
+                    sb_signboard_input_type = sb.get("signboard_input_type", "text")
+                    sb_text = sb.get("text", "")
+                    sb_logo = sb.get("logo", "")
+                    sb_logo_type = sb.get("logo_type", "channel")
+                    sb_signboard_image = sb.get("signboard_image", "")
+                    sb_installation_type = sb.get("installation_type", "맨벽")
+                    sb_sign_type = sb.get("sign_type", sign_type)
+                    sb_bg_color = sb.get("bg_color", bg_color)
+                    sb_text_color = sb.get("text_color", text_color)
+                    sb_text_direction = sb.get("text_direction", text_direction)
+                    sb_font_size = int(sb.get("font_size", font_size))
+                    sb_text_position_x = int(sb.get("text_position_x", text_position_x))
+                    sb_text_position_y = int(sb.get("text_position_y", text_position_y))
+                    sb_orientation = sb.get("orientation", orientation)
+                    sb_flip_horizontal = str(sb.get("flip_horizontal", flip_horizontal))
+                    sb_flip_vertical = str(sb.get("flip_vertical", flip_vertical))
+                    sb_rotate90 = int(sb.get("rotate90", rotate90))
+                    sb_rotation = float(sb.get("rotation", rotation))
+
+                    # 디버깅용 로그
+                    log_error(f"[MULTI] index={idx}, type={sb_signboard_input_type}, text={sb_text}, sign_type={sb_sign_type}")
+
+                    # 이하 로직은 기존 단일 간판 처리와 동일하게, sb_* 값을 사용
+
+                    # 폴리곤 점 파싱
+                    points = sb_points
+
+                    # 4점인 경우: 실제 변 길이 계산 (정확한 방향 파악)
+                    if len(points) == 4:
+                        ordered = order_points(points)
+                        top_width = np.sqrt((ordered[1][0] - ordered[0][0])**2 + (ordered[1][1] - ordered[0][1])**2)
+                        left_height = np.sqrt((ordered[3][0] - ordered[0][0])**2 + (ordered[3][1] - ordered[0][1])**2)
+                        region_width = int(top_width)
+                        region_height = int(left_height)
+                    else:
+                        xs = [p[0] for p in points]
+                        ys = [p[1] for p in points]
+                        region_width = int(max(xs) - min(xs))
+                        region_height = int(max(ys) - min(ys))
+
+                    region_width = max(300, region_width)
+                    region_height = max(100, region_height)
+
+                    if sb_orientation == "vertical":
+                        region_width, region_height = region_height, region_width
+                    elif sb_orientation == "horizontal":
+                        pass
+
+                    auto_direction = analyze_polygon_shape(points)
+                    final_direction = auto_direction if sb_text_direction == "auto" else sb_text_direction
+
+                    auto_font_size = int(region_height * 0.6)
+                    auto_font_size = max(30, min(auto_font_size, int(region_height * 0.9)))
+
+                    if sb_font_size != 100:
+                        scale_factor = region_height / 300
+                        final_font_size = int(sb_font_size * scale_factor)
+                    else:
+                        final_font_size = auto_font_size
+
+                    if sb_signboard_input_type == "image" and sb_signboard_image:
+                        uploaded_img = base64_to_image(sb_signboard_image)
+
+                        if sb_rotate90 == 90:
+                            uploaded_img = cv2.rotate(uploaded_img, cv2.ROTATE_90_CLOCKWISE)
+                        elif sb_rotate90 == 180:
+                            uploaded_img = cv2.rotate(uploaded_img, cv2.ROTATE_180)
+                        elif sb_rotate90 == 270:
+                            uploaded_img = cv2.rotate(uploaded_img, cv2.ROTATE_90_COUNTERCLOCKWISE)
+
+                        if sb_flip_horizontal.lower() == "true":
+                            uploaded_img = cv2.flip(uploaded_img, 1)
+                        if sb_flip_vertical.lower() == "true":
+                            uploaded_img = cv2.flip(uploaded_img, 0)
+
+                        if sb_rotate90 == 0 and sb_flip_horizontal.lower() == "false" and sb_flip_vertical.lower() == "false":
+                            h_img, w_img = uploaded_img.shape[:2]
+                            img_ratio = w_img / h_img
+                            region_ratio = region_width / region_height
+
+                            if sb_orientation == "auto":
+                                if (img_ratio > 1 and region_ratio < 1) or (img_ratio < 1 and region_ratio > 1):
+                                    uploaded_img = cv2.rotate(uploaded_img, cv2.ROTATE_90_COUNTERCLOCKWISE)
+                            elif sb_orientation == "vertical":
+                                if img_ratio > 1:
+                                    uploaded_img = cv2.rotate(uploaded_img, cv2.ROTATE_90_COUNTERCLOCKWISE)
+                            elif sb_orientation == "horizontal":
+                                if img_ratio < 1:
+                                    uploaded_img = cv2.rotate(uploaded_img, cv2.ROTATE_90_CLOCKWISE)
+
+                        signboard_img = cv2.resize(uploaded_img, (region_width, region_height))
+                        text_layer = None
+                        actual_text_width = None
+                        actual_text_height = None
+                    else:
+                        signboard_img, text_layer = render_signboard(
+                            sb_text, sb_logo, sb_logo_type, sb_installation_type, sb_sign_type,
+                            sb_bg_color, sb_text_color, final_direction, final_font_size,
+                            sb_text_position_x, sb_text_position_y, region_width, region_height
+                        )
+
+                        from PIL import Image, ImageDraw, ImageFont
+                        font = get_korean_font(final_font_size)
+                        draw_temp = ImageDraw.Draw(Image.new('RGB', (region_width, region_height)))
+                        if final_direction == "vertical":
+                            text_vertical = '\n'.join(list(sb_text))
+                            bbox = draw_temp.multiline_textbbox((0, 0), text_vertical, font=font)
+                        else:
+                            bbox = draw_temp.textbbox((0, 0), sb_text, font=font)
+                        actual_text_width = bbox[2] - bbox[0]
+                        actual_text_height = bbox[3] - bbox[1]
+
+                    rotation_value = 0.0
+                    try:
+                        rotation_value = float(sb_rotation)
+                    except (ValueError, TypeError):
+                        rotation_value = 0.0
+
+                    rotation_float = rotation_value
+
+                    if abs(rotation_float) > 0.01:
+                        try:
+                            original_h, original_w = signboard_img.shape[:2]
+                            signboard_pil = Image.fromarray(cv2.cvtColor(signboard_img, cv2.COLOR_BGR2RGB))
+                            rotated_pil = signboard_pil.rotate(
+                                -rotation_float,
+                                expand=True,
+                                fillcolor=(0, 0, 0),
+                                resample=Image.Resampling.BILINEAR
+                            )
+                            signboard_img_rotated = cv2.cvtColor(np.array(rotated_pil), cv2.COLOR_RGB2BGR)
+                            signboard_img = signboard_img_rotated
+
+                            if text_layer is not None:
+                                text_pil = Image.fromarray(cv2.cvtColor(text_layer, cv2.COLOR_BGR2RGB))
+                                rotated_text_pil = text_pil.rotate(-rotation_float, expand=True, fillcolor=(0, 0, 0))
+                                text_layer = cv2.cvtColor(np.array(rotated_text_pil), cv2.COLOR_RGB2BGR)
+                        except Exception as e:
+                            log_error("회전 적용 중 오류 발생", e)
+
+                    # 현재 누적된 day/night에 이 간판 합성
+                    # - 주간: 항상 current_day 기준으로 추가 합성
+                    # - 야간: 처음 한 번만 배경을 어둡게 하고, 이후에는 이미 어두운 current_night 위에만 간판 추가
+                    base_day = current_day
+                    base_night = current_night if current_night is not None else building_img
+                    pre_dark = current_night is not None
+
+                    day_sim, night_sim = composite_signboard(
+                        base_day,
+                        signboard_img,
+                        points,
+                        sb_sign_type,
+                        text_layer,
+                        lights_list,
+                        lights_on,
+                        building_photo_night=base_night,
+                        pre_darkened=pre_dark,
+                    )
+                    current_day = day_sim
+                    current_night = night_sim
+
+                except Exception as e:
+                    log_error(f"[ERROR] 복수 간판 처리 중 오류 (index={idx})", e)
+                    continue
+
+            if current_night is None:
+                # 간판이 하나도 제대로 처리되지 않은 경우
+                day_sim = building_img
+                night_sim = building_img
+            else:
+                day_sim = current_day
+                night_sim = current_night
+
+            day_base64 = image_to_base64(day_sim)
+            night_base64 = image_to_base64(night_sim)
+
+            response_data = {
+                "day_simulation": day_base64,
+                "night_simulation": night_base64
+            }
+
+            return JSONResponse(content=response_data)
+
+        # 단일 간판 모드 (기존 로직 유지)
+
         # rotation 값을 문자열에서 float로 변환
         rotation_value = 0.0
         if rotation is not None:
@@ -1223,9 +1464,7 @@ async def generate_simulation(
         
         print(f"[DEBUG] API 요청 받음 - rotation (원본): {rotation}, rotation (변환): {rotation_value}, rotate90: {rotate90}, type: {type(rotation)}")
         log_error(f"API 요청 받음 - rotation: {rotation}, rotation_value: {rotation_value}, rotate90: {rotate90}")
-        # Base64 이미지 디코딩
-        building_img = base64_to_image(building_photo)
-        
+
         # 폴리곤 점 파싱
         points = json.loads(polygon_points)
         
@@ -1400,14 +1639,6 @@ async def generate_simulation(
             print(f"[DEBUG] 회전 적용 안 함 - rotation: {rotation}, rotation_float: {rotation_float}")
             log_error(f"회전 적용 안 함 - rotation: {rotation}")
         
-        lights_list = json.loads(lights) if lights else []
-        lights_on = lights_enabled.lower() != "false"
-        
-        print(f"[DEBUG] lights_enabled 값: {lights_enabled}")
-        print(f"[DEBUG] lights_on 계산 결과: {lights_on}")
-        print(f"[DEBUG] lights_list: {lights_list}")
-        print(f"[DEBUG] lights_list 길이: {len(lights_list)}")
-
         # 이미지 합성
         day_sim, night_sim = composite_signboard(building_img, signboard_img, points, sign_type, text_layer, lights_list, lights_on)
         

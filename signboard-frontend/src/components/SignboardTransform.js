@@ -151,7 +151,17 @@ const SignboardTransform = ({
   }, [signboards, imageSize, originalSignboards]); // transforms를 의존성에서 제거하여 무한 루프 방지
 
   const getTransform = (id) => {
-    return transforms[id] || { x: 0, y: 0, width: 100, height: 100, rotation: 0, scale: 1, fontSize: 100 };
+    return transforms[id] || { 
+      x: 0, 
+      y: 0, 
+      width: 100, 
+      height: 100, 
+      rotation: 0, 
+      scale: 1, 
+      fontSize: 100,
+      textPositionX: 50,
+      textPositionY: 50
+    };
   };
 
   const updateTransform = (id, updates) => {
@@ -201,12 +211,21 @@ const SignboardTransform = ({
       const boxCenterY = (newY / 100) * imageSize.height;
 
       // 간판 영역(노란 박스) 계산 (px)
+      // 단일/복수 간판 공통: 현재 선택된 간판의 polygon_points 기준으로 계산
       let signboardX = 0;
       let signboardY = 0;
       let signboardWidth = imageSize.width;
       let signboardHeight = imageSize.height;
 
-      if (selectedArea) {
+      const currentSignboard = signboards.find(sb => sb.id === selectedId);
+      if (currentSignboard && currentSignboard.polygon_points && currentSignboard.polygon_points.length >= 4) {
+        const xs = currentSignboard.polygon_points.map(p => p[0]);
+        const ys = currentSignboard.polygon_points.map(p => p[1]);
+        signboardX = Math.min(...xs);
+        signboardY = Math.min(...ys);
+        signboardWidth = Math.max(...xs) - signboardX;
+        signboardHeight = Math.max(...ys) - signboardY;
+      } else if (selectedArea) {
         if (selectedArea.type === 'polygon' && selectedArea.points.length >= 4) {
           const xs = selectedArea.points.map(p => p.x);
           const ys = selectedArea.points.map(p => p.y);
@@ -316,56 +335,89 @@ const SignboardTransform = ({
         const transform = getTransform(signboard.id);
         const isSelected = selectedId === signboard.id;
         
-        // transform이 이미 퍼센트로 저장되어 있음
+        // transform이 이미 퍼센트로 저장되어 있음 (이미지 전체 기준)
         const leftPercent = transform.x - transform.width / 2;
         const topPercent = transform.y - transform.height / 2;
         const widthPercent = transform.width;
         const heightPercent = transform.height;
 
+        // 고스트 텍스트 박스:
+        // - 파란 박스(간판편집 박스) 중심을 기준으로
+        // - 파란 박스 크기의 일정 비율(가로 70%, 세로 60%)로 그려서
+        //   "이 박스 안에 글자가 들어간다"는 감만 명확하게 주는 용도
+        const ghostScaleX = 0.7;
+        const ghostScaleY = 0.6;
+        const ghostWidthPercent = widthPercent * ghostScaleX;
+        const ghostHeightPercent = heightPercent * ghostScaleY;
+        const ghostLeftPercent = transform.x; // 중심 기준
+        const ghostTopPercent = transform.y;  // 중심 기준
+
         return (
-          <div
-            key={signboard.id}
-            style={{
-              position: 'absolute',
-              left: `${leftPercent}%`,
-              top: `${topPercent}%`,
-              width: `${widthPercent}%`,
-              height: `${heightPercent}%`,
-              transform: `rotate(${transform.rotation}deg)`,
-              transformOrigin: 'center',
-              border: isSelected ? '2px solid #3B82F6' : '2px dashed rgba(255,255,255,0.3)',
-              cursor: 'move',
-              pointerEvents: 'auto',
-              zIndex: isSelected ? 10 : 1
-            }}
-            onMouseDown={(e) => handleMouseDown(e, signboard.id, 'move')}
-            onClick={(e) => {
-              e.stopPropagation();
-              setSelectedId(signboard.id);
-            }}
-          >
-            {/* 간판 정보 표시 */}
-            <div className="absolute -top-6 left-0 bg-blue-500 text-white text-xs px-2 py-1 rounded whitespace-nowrap">
-              {signboard.text || `간판 ${signboard.id + 1}`}
+          <React.Fragment key={signboard.id}>
+            {/* 파란 변환 박스 */}
+            <div
+              style={{
+                position: 'absolute',
+                left: `${leftPercent}%`,
+                top: `${topPercent}%`,
+                width: `${widthPercent}%`,
+                height: `${heightPercent}%`,
+                transform: `rotate(${transform.rotation}deg)`,
+                transformOrigin: 'center',
+                border: isSelected ? '2px solid #3B82F6' : '2px dashed rgba(255,255,255,0.3)',
+                cursor: 'move',
+                pointerEvents: 'auto',
+                zIndex: isSelected ? 10 : 1
+              }}
+              onMouseDown={(e) => handleMouseDown(e, signboard.id, 'move')}
+              onClick={(e) => {
+                e.stopPropagation();
+                setSelectedId(signboard.id);
+              }}
+            >
+              {/* 간판 정보 표시 */}
+              <div className="absolute -top-6 left-0 bg-blue-500 text-white text-xs px-2 py-1 rounded whitespace-nowrap">
+                {signboard.text || `간판 ${signboard.id + 1}`}
+              </div>
+
+              {/* Transform 핸들들 */}
+              {isSelected && (
+                <>
+                  {/* 모서리 핸들 (크기 조절) */}
+                  <div
+                    className="absolute -right-2 -bottom-2 w-4 h-4 bg-blue-500 rounded-full cursor-se-resize"
+                    onMouseDown={(e) => handleMouseDown(e, signboard.id, 'resize-se')}
+                  />
+                  
+                  {/* 회전 핸들 */}
+                  <div
+                    className="absolute -top-8 left-1/2 -translate-x-1/2 w-4 h-4 bg-green-500 rounded-full cursor-grab"
+                    onMouseDown={(e) => handleMouseDown(e, signboard.id, 'rotate')}
+                  />
+                </>
+              )}
             </div>
 
-            {/* Transform 핸들들 */}
+            {/* 고스트 텍스트 박스 (상호 위치 미리보기 - 파란 박스 안 예상 텍스트 영역) */}
             {isSelected && (
-              <>
-                {/* 모서리 핸들 (크기 조절) */}
-                <div
-                  className="absolute -right-2 -bottom-2 w-4 h-4 bg-blue-500 rounded-full cursor-se-resize"
-                  onMouseDown={(e) => handleMouseDown(e, signboard.id, 'resize-se')}
-                />
-                
-                {/* 회전 핸들 */}
-                <div
-                  className="absolute -top-8 left-1/2 -translate-x-1/2 w-4 h-4 bg-green-500 rounded-full cursor-grab"
-                  onMouseDown={(e) => handleMouseDown(e, signboard.id, 'rotate')}
-                />
-              </>
+              <div
+                style={{
+                  position: 'absolute',
+                  left: `${ghostLeftPercent}%`,
+                  top: `${ghostTopPercent}%`,
+                  width: `${ghostWidthPercent}%`,
+                  height: `${ghostHeightPercent}%`,
+                  transform: 'translate(-50%, -50%)',
+                  border: '1px dashed rgba(168,85,247,0.9)',
+                  backgroundColor: 'rgba(168,85,247,0.18)',
+                  borderRadius: 4,
+                  boxShadow: '0 0 0 1px rgba(255,255,255,0.4)',
+                  pointerEvents: 'none',
+                  zIndex: 15
+                }}
+              />
             )}
-          </div>
+          </React.Fragment>
         );
       })}
 

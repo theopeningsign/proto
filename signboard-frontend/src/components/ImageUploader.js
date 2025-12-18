@@ -103,11 +103,22 @@ const ImageUploader = ({ image, onImageUpload, selectedArea, onAreaChange, signb
       
       ctx.restore();
 
-      // 다른 간판들의 폴리곤 먼저 그리기 (읽기 전용)
+      // 다른 간판들의 영역 먼저 그리기 (읽기 전용)
       if (signboards && signboards.length > 0) {
         signboards.forEach(signboard => {
-          if (signboard.id !== currentSignboardId && signboard.selectedArea && signboard.selectedArea.type === 'polygon') {
-            drawPolygon(ctx, signboard.selectedArea.points, true, true); // 읽기 전용
+          if (!signboard.selectedArea) return;
+          const area = signboard.selectedArea;
+          if (area.type === 'polygon') {
+            drawPolygon(ctx, area.points, true, true); // 읽기 전용
+          } else if (area.type === 'rect') {
+            const { x, y, width, height } = area;
+            const rectPoints = [
+              { x, y },
+              { x: x + width, y },
+              { x: x + width, y: y + height },
+              { x, y: y + height },
+            ];
+            drawPolygon(ctx, rectPoints, true, true);
           }
         });
       }
@@ -130,10 +141,10 @@ const ImageUploader = ({ image, onImageUpload, selectedArea, onAreaChange, signb
 
     // 선 그리기
     if (readonly) {
-      // 읽기 전용: 회색으로 표시
-      ctx.strokeStyle = '#999999';
-      ctx.lineWidth = 2 / scale;
-      ctx.setLineDash([5 / scale, 5 / scale]); // 점선
+      // 읽기 전용: 이전 간판 영역은 더 눈에 띄게 (진한 청록색)
+      ctx.strokeStyle = '#22D3EE'; // cyan-400
+      ctx.lineWidth = 3 / scale;
+      ctx.setLineDash([4 / scale, 4 / scale]); // 점선
     } else {
       ctx.strokeStyle = complete ? '#FFD700' : '#00BFFF';
       ctx.lineWidth = 3 / scale;
@@ -147,15 +158,16 @@ const ImageUploader = ({ image, onImageUpload, selectedArea, onAreaChange, signb
       ctx.lineTo(pts[i].x, pts[i].y);
     }
     
-    if (complete && pts.length > 2) {
-      ctx.closePath();
-      if (readonly) {
-        ctx.fillStyle = 'rgba(150, 150, 150, 0.1)';
-      } else {
-        ctx.fillStyle = 'rgba(255, 215, 0, 0.15)';
+      if (complete && pts.length > 2) {
+        ctx.closePath();
+        if (readonly) {
+          // 이전 간판 영역: 파란-청록 계열 반투명
+          ctx.fillStyle = 'rgba(34, 211, 238, 0.18)';
+        } else {
+          ctx.fillStyle = 'rgba(255, 215, 0, 0.15)';
+        }
+        ctx.fill();
       }
-      ctx.fill();
-    }
     
     ctx.stroke();
 
