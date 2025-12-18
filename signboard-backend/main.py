@@ -44,6 +44,33 @@ def image_to_base64(image: np.ndarray) -> str:
     image_base64 = base64.b64encode(buffer).decode('utf-8')
     return f"data:image/png;base64,{image_base64}"
 
+def remove_white_background(image_bgr: np.ndarray, threshold: int = 240) -> np.ndarray:
+    """흰색 배경을 투명 처리하여 RGBA 이미지로 변환
+    Args:
+        image_bgr: BGR 형식의 이미지
+        threshold: 흰색으로 간주할 RGB 값의 임계값 (0-255, 기본값 240)
+    Returns:
+        RGBA 형식의 이미지 (흰색 부분은 투명)
+    """
+    # BGR을 RGB로 변환
+    image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
+    
+    # 흰색 픽셀 감지 (RGB 모두 threshold 이상)
+    white_mask = (image_rgb[:, :, 0] >= threshold) & \
+                 (image_rgb[:, :, 1] >= threshold) & \
+                 (image_rgb[:, :, 2] >= threshold)
+    
+    # RGBA 이미지 생성
+    h, w = image_rgb.shape[:2]
+    image_rgba = np.zeros((h, w, 4), dtype=np.uint8)
+    image_rgba[:, :, :3] = image_rgb
+    image_rgba[:, :, 3] = 255  # 기본 알파값
+    
+    # 흰색 부분을 투명 처리
+    image_rgba[:, :, 3][white_mask] = 0
+    
+    return image_rgba
+
 def get_korean_font(font_size: int):
     """한글 폰트 찾기 - 여러 폰트 시도"""
     font_paths = [
@@ -1359,6 +1386,7 @@ async def generate_simulation(
     flip_vertical: str = Form("false"),
     rotate90: int = Form(0),
     rotation: float = Form(0.0),  # 회전 각도 (도 단위, -180 ~ 180)
+    remove_white_bg: str = Form("false"),  # 흰색 배경 투명 처리
     lights: str = Form("[]"),
     lights_enabled: str = Form("true"),
     # 복수 간판용: 프론트에서 JSON 문자열로 전달
@@ -1419,6 +1447,7 @@ async def generate_simulation(
                     sb_flip_vertical = str(sb.get("flip_vertical", flip_vertical))
                     sb_rotate90 = int(sb.get("rotate90", rotate90))
                     sb_rotation = float(sb.get("rotation", rotation))
+                    sb_remove_white_bg = str(sb.get("remove_white_bg", remove_white_bg))
 
                     # 디버깅용 로그
                     log_error(f"[MULTI] index={idx}, type={sb_signboard_input_type}, text={sb_text}, sign_type={sb_sign_type}")
@@ -1491,6 +1520,16 @@ async def generate_simulation(
                                 if img_ratio < 1:
                                     uploaded_img = cv2.rotate(uploaded_img, cv2.ROTATE_90_CLOCKWISE)
 
+                        # 흰색 배경 투명 처리
+                        if sb_remove_white_bg.lower() == "true":
+                            image_rgba = remove_white_background(uploaded_img)
+                            # RGBA를 BGR로 변환 (투명 부분은 검은색으로)
+                            image_rgb = image_rgba[:, :, :3]
+                            alpha = image_rgba[:, :, 3:4] / 255.0
+                            # 투명 부분을 검은색으로 처리 (composite_signboard의 transparency_mask가 처리)
+                            uploaded_img = (image_rgb * alpha + (1 - alpha) * 0).astype(np.uint8)
+                            uploaded_img = cv2.cvtColor(uploaded_img, cv2.COLOR_RGB2BGR)
+                        
                         signboard_img = cv2.resize(uploaded_img, (region_width, region_height))
                         text_layer = None
                         actual_text_width = None
@@ -1695,6 +1734,16 @@ async def generate_simulation(
                     # 가로 강제: 이미지가 세로로 길면 시계방향 회전
                     if img_ratio < 1:
                         uploaded_img = cv2.rotate(uploaded_img, cv2.ROTATE_90_CLOCKWISE)
+            
+            # 흰색 배경 투명 처리
+            if remove_white_bg.lower() == "true":
+                image_rgba = remove_white_background(uploaded_img)
+                # RGBA를 BGR로 변환 (투명 부분은 검은색으로)
+                image_rgb = image_rgba[:, :, :3]
+                alpha = image_rgba[:, :, 3:4] / 255.0
+                # 투명 부분을 검은색으로 처리 (composite_signboard의 transparency_mask가 처리)
+                uploaded_img = (image_rgb * alpha + (1 - alpha) * 0).astype(np.uint8)
+                uploaded_img = cv2.cvtColor(uploaded_img, cv2.COLOR_RGB2BGR)
             
             # 영역 크기에 맞춰 리사이즈
             signboard_img = cv2.resize(uploaded_img, (region_width, region_height))

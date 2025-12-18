@@ -161,6 +161,22 @@ const SignboardForm = ({ formData, onFormDataChange, section = 'full' }) => {
                   </label>
                 </div>
 
+                {/* 흰색 배경 투명 처리 */}
+                <div className="mb-3">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={formData.removeWhiteBg || false}
+                      onChange={(e) => handleChange('removeWhiteBg', e.target.checked)}
+                      className="w-4 h-4 accent-blue-500"
+                    />
+                    <span className="text-sm text-gray-300">✨ 흰색 배경 투명 처리</span>
+                  </label>
+                  <p className="mt-1 text-xs text-gray-400 ml-6">
+                    흰색 배경이 있는 이미지의 배경을 투명하게 처리합니다
+                  </p>
+                </div>
+
                 {/* 회전 옵션 */}
                 <div>
                   <label className="block text-xs text-gray-400 mb-2">회전</label>

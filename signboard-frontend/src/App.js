@@ -26,7 +26,8 @@ function App() {
     flipHorizontal: false,
     flipVertical: false,
     rotate90: 0,
-    rotation: 0.0
+    rotation: 0.0,
+    removeWhiteBg: false
   });
 
   const [signboards, setSignboards] = useState([]); // {id, name, selectedArea, formData}
@@ -161,7 +162,8 @@ function App() {
           flip_horizontal: sbForm.flipHorizontal ? 'true' : 'false',
           flip_vertical: sbForm.flipVertical ? 'true' : 'false',
           rotate90: parseInt(sbForm.rotate90) || 0,
-          rotation: parseFloat(sbForm.rotation) || 0.0
+          rotation: parseFloat(sbForm.rotation) || 0.0,
+          remove_white_bg: sbForm.removeWhiteBg ? 'true' : 'false'
         });
       }
 
@@ -204,6 +206,7 @@ function App() {
       formDataToSend.append('flip_vertical', firstForm.flipVertical ? 'true' : 'false');
       formDataToSend.append('rotate90', String(parseInt(firstForm.rotate90) || 0));
       formDataToSend.append('rotation', String(parseFloat(firstForm.rotation) || 0.0));
+      formDataToSend.append('remove_white_bg', firstForm.removeWhiteBg ? 'true' : 'false');
       formDataToSend.append('lights', JSON.stringify(lights || []));
       formDataToSend.append('lights_enabled', lightsEnabled ? 'true' : 'false');
       
