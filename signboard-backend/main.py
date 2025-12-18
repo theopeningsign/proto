@@ -1109,41 +1109,49 @@ def composite_signboard(
     # 검은색 부분 투명도 처리 (야간에도 적용)
     # gray_sign과 transparency_mask는 이미 위에서 계산됨
     
-    # 전광채널의 경우: 배경은 어둡게 유지, 글자는 주간 밝기 그대로 (멀티 간판에서도 일관되게 보이도록)
-    if sign_type == "전광채널" and text_layer is not None:
-        # 배경 레이어 추출 (간판에서 텍스트 제외)
-        bg_layer = signboard_image.copy()
-        # 텍스트 마스크 생성
-        text_mask = (text_layer.sum(axis=2) > 0).astype(np.float32)
-        text_mask = np.stack([text_mask, text_mask, text_mask], axis=2)
-        
-        # 배경만 추출 (텍스트 제외)
-        bg_only = bg_layer * (1 - text_mask)
-        
-        # 배경과 텍스트를 각각 변환
-        if len(polygon_points) == 4 and 'M' in locals():
-            warped_bg = cv2.warpPerspective(bg_only, M, (w, h))
-            warped_text = cv2.warpPerspective(text_layer, M, (w, h))
-            text_mask_warped = cv2.warpPerspective(text_mask, M, (w, h))
-        else:
-            # 폴리곤: 바운딩 박스 방식
-            warped_bg = np.zeros((h, w, 3), dtype=np.float32)
-            if bbox_w > 0 and bbox_h > 0:
-                resized_bg = cv2.resize(bg_only, (bbox_w, bbox_h))
-                warped_bg[min_y:min_y+bbox_h, min_x:min_x+bbox_w] = resized_bg
+    # 전광채널의 경우: 배경은 어둡게 유지, 글자/이미지는 주간 밝기 그대로 (멀티 간판에서도 일관되게 보이도록)
+    if sign_type == "전광채널":
+        if text_layer is not None:
+            # 텍스트 방식: 배경 레이어 추출 (간판에서 텍스트 제외)
+            bg_layer = signboard_image.copy()
+            # 텍스트 마스크 생성
+            text_mask = (text_layer.sum(axis=2) > 0).astype(np.float32)
+            text_mask = np.stack([text_mask, text_mask, text_mask], axis=2)
             
-            warped_text = warped_text_full if warped_text_full is not None else np.zeros((h, w, 3), dtype=np.uint8)
-            text_mask_warped = (warped_text.sum(axis=2) > 0).astype(np.float32)
-            text_mask_warped = np.stack([text_mask_warped, text_mask_warped, text_mask_warped], axis=2)
-        
-        # 배경을 어둡게 유지 (주간 배경에 야간 효과 적용)
-        warped_bg_dark = warped_bg.astype(np.float32) * 0.25
+            # 배경만 추출 (텍스트 제외)
+            bg_only = bg_layer * (1 - text_mask)
+            
+            # 배경과 텍스트를 각각 변환
+            if len(polygon_points) == 4 and 'M' in locals():
+                warped_bg = cv2.warpPerspective(bg_only, M, (w, h))
+                warped_text = cv2.warpPerspective(text_layer, M, (w, h))
+                text_mask_warped = cv2.warpPerspective(text_mask, M, (w, h))
+            else:
+                # 폴리곤: 바운딩 박스 방식
+                warped_bg = np.zeros((h, w, 3), dtype=np.float32)
+                if bbox_w > 0 and bbox_h > 0:
+                    resized_bg = cv2.resize(bg_only, (bbox_w, bbox_h))
+                    warped_bg[min_y:min_y+bbox_h, min_x:min_x+bbox_w] = resized_bg
+                
+                warped_text = warped_text_full if warped_text_full is not None else np.zeros((h, w, 3), dtype=np.uint8)
+                text_mask_warped = (warped_text.sum(axis=2) > 0).astype(np.float32)
+                text_mask_warped = np.stack([text_mask_warped, text_mask_warped, text_mask_warped], axis=2)
+            
+            # 배경을 어둡게 유지 (주간 배경에 야간 효과 적용)
+            warped_bg_dark = warped_bg.astype(np.float32) * 0.25
 
-        # 야간: 배경(선택영역)은 어둡게, 텍스트는 주간 밝기 그대로
-        # 멀티 간판에서도 글자 밝기가 눌리지 않도록, 텍스트는 night_base/배경과의 최댓값으로 합성
-        base_night = night_base * (1 - combined_mask) + warped_bg_dark * combined_mask
-        text_contrib = warped_text.astype(np.float32) * text_mask_warped * transparency_mask
-        night_result = np.maximum(base_night, text_contrib)
+            # 야간: 배경(선택영역)은 어둡게, 텍스트는 주간 밝기 그대로
+            # 멀티 간판에서도 글자 밝기가 눌리지 않도록, 텍스트는 night_base/배경과의 최댓값으로 합성
+            base_night = night_base * (1 - combined_mask) + warped_bg_dark * combined_mask
+            text_contrib = warped_text.astype(np.float32) * text_mask_warped * transparency_mask
+            night_result = np.maximum(base_night, text_contrib)
+        else:
+            # 이미지 업로드 방식: 이미지 전체를 주간 밝기 그대로 유지
+            # 배경은 어둡게, 이미지는 주간 밝기 그대로
+            base_night = night_base * (1 - combined_mask)
+            # 이미지는 주간 밝기 그대로 (야간 효과 제거)
+            image_contrib = warped_sign.astype(np.float32) * combined_mask
+            night_result = base_night + image_contrib
     else:
         # 다른 간판 종류: 전체 간판에 발광 강도 적용
         if sign_type == "후광채널":
