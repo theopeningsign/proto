@@ -288,13 +288,14 @@ const ResultViewer = ({
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-xl font-semibold text-white">시뮬레이션 결과</h2>
         <div className="flex items-center gap-3">
-          <span
-            className={`px-3 py-1 rounded-full text-sm font-medium ${
-              viewMode === 'day' ? 'bg-blue-500/20 text-blue-400' : 'bg-purple-500/20 text-purple-400'
+          <button
+            onClick={() => setViewMode(viewMode === 'day' ? 'night' : 'day')}
+            className={`px-3 py-1 rounded-full text-sm font-medium transition-colors cursor-pointer ${
+              viewMode === 'day' ? 'bg-blue-500/20 text-blue-400 hover:bg-blue-500/30' : 'bg-purple-500/20 text-purple-400 hover:bg-purple-500/30'
             }`}
           >
             {viewMode === 'day' ? 'DAY' : 'NIGHT'}
-          </span>
+          </button>
           <button
             onClick={() => {
               setShowTransform(!showTransform);
@@ -338,21 +339,6 @@ const ResultViewer = ({
         </div>
       </div>
 
-      <div className="mb-4">
-        <div className="flex items-center justify-between mb-2">
-          <span className={`text-sm font-medium transition-colors ${viewMode === 'day' ? 'text-blue-400' : 'text-gray-500'}`}>주간</span>
-          <span className={`text-sm font-medium transition-colors ${viewMode === 'night' ? 'text-purple-400' : 'text-gray-500'}`}>야간</span>
-        </div>
-        <input
-          type="range"
-          min="0"
-          max="1"
-          step="1"
-          value={viewMode === 'day' ? 0 : 1}
-          onChange={(e) => setViewMode(e.target.value === '0' ? 'day' : 'night')}
-          className="w-full h-2 bg-white/10 rounded-lg appearance-none cursor-pointer accent-blue-500"
-        />
-      </div>
 
       <div className="mb-4 border-2 border-white/20 rounded-xl overflow-hidden bg-black/20 relative">
         <div

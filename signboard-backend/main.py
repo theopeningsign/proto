@@ -650,8 +650,10 @@ def render_scashi_signboard(text: str, bg_color: str, text_color: str, logo_img:
 
 def render_combined_signboard(installation_type: str, sign_type: str, text: str, bg_color: str, text_color: str, logo_img: Image.Image = None, logo_type: str = "channel", text_direction: str = "horizontal", font_size: int = 100, text_position_x: int = 50, text_position_y: int = 50, width: int = 1200, height: int = 300):
     """설치 방식 + 간판 종류 조합 렌더링
-    Returns: signboard_image (전광채널은 tuple로 (signboard, text_layer) 반환)
-    Returns: (signboard_image, text_layer, text_width, text_height) - 텍스트 크기 정보 포함
+    Returns: (signboard_image, text_layer)
+    - 전광채널: (signboard, text_layer) - text_layer는 텍스트만 분리
+    - 후광채널: (signboard, text_layer) - text_layer는 텍스트만 분리 (야간 효과용)
+    - 기타: (signboard, None)
     """
     # 배경 생성 (설치 방식에 따라) - 프레임바는 텍스트 크기 측정 후에 그려야 함
     is_frame_bar = (installation_type == "프레임바")
@@ -698,7 +700,7 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
     if not text or not text.strip():
         if sign_type == "전광채널":
             return signboard_np, None
-        return signboard_np
+        return signboard_np, None
     
     # 폰트 크기 자동 조정: 텍스트가 영역 안에 들어가도록
     min_font_size = 20  # 최소 폰트 크기
@@ -891,10 +893,10 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
         text_layer_bgr = cv2.cvtColor(text_layer_rgba, cv2.COLOR_RGBA2BGR)
         
         if sign_type == "후광채널":
-            # 후광: 뒤에만
-            text_mask = create_text_mask(text_to_render, font, (width, height), position)
-            backlight = safe_gaussian_blur(text_mask, (81, 81), 40)
-            signboard_np = cv2.add(signboard_np.astype(np.float32), backlight.astype(np.float32)).astype(np.uint8)
+            # 후광채널: 주간에는 일반 채널 간판과 동일 (후광 효과 없음)
+            # 야간에만 글자 뒤에서 빛나는 효과 (composite_signboard에서 처리)
+            # 주간에는 그냥 텍스트만 추가
+            pass  # 주간에는 후광 효과 없음
         elif sign_type == "전후광채널":
             # 전후광: 앞+뒤
             text_glow_front = safe_gaussian_blur(text_layer_bgr, (25, 25), 10)
@@ -906,7 +908,11 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
         
         result = cv2.add(signboard_np, text_layer_bgr)
         result = add_3d_depth(result, depth=6)
-        return result
+        
+        # 후광채널일 때 text_layer 반환 (야간 효과 구현용)
+        if sign_type == "후광채널":
+            return result, text_layer_bgr
+        return result, None
     
     elif sign_type == "스카시":
         # 스카시: 비조명 입체
@@ -914,7 +920,7 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
         draw.text(position, text_to_render, fill=text_rgb, font=font)
         result_np = cv2.cvtColor(np.array(signboard), cv2.COLOR_RGB2BGR)
         result = add_3d_depth(result_np, depth=8)
-        return result
+        return result, None
     
     elif sign_type == "플렉스":
         # 플렉스: 천 재질 전체 발광
@@ -924,7 +930,7 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
         glow = safe_gaussian_blur(result_np, (51, 51), 20)
         result = cv2.addWeighted(result_np, 0.7, glow, 0.3, 0)
         result = add_3d_depth(result, depth=6)
-        return result
+        return result, None
     
     else:
         # 기본: 간단한 텍스트
@@ -932,7 +938,7 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
         draw.text(position, text_to_render, fill=text_rgb, font=font)
         result_np = cv2.cvtColor(np.array(signboard), cv2.COLOR_RGB2BGR)
         result = add_3d_depth(result_np, depth=6)
-        return result
+        return result, None
 
 def render_signboard(text: str, logo_path: str, logo_type: str, installation_type: str, sign_type: str, bg_color: str, text_color: str, text_direction: str = "horizontal", font_size: int = 100, text_position_x: int = 50, text_position_y: int = 50, width: int = 1200, height: int = 300) -> tuple:
     """간판 이미지 생성 - 설치 방식 + 간판 종류
@@ -952,8 +958,8 @@ def render_signboard(text: str, logo_path: str, logo_type: str, installation_typ
         result, text_layer = render_combined_signboard(installation_type, "전광채널", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height)
         return result, text_layer
     elif sign_type == "후광채널":
-        result = render_combined_signboard(installation_type, "후광채널", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height)
-        return result, None
+        result, text_layer = render_combined_signboard(installation_type, "후광채널", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height)
+        return result, text_layer
     elif sign_type == "전후광채널":
         result = render_combined_signboard(installation_type, "전후광채널", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height)
         return result, None
@@ -1155,22 +1161,58 @@ def composite_signboard(
     else:
         # 다른 간판 종류: 전체 간판에 발광 강도 적용
         if sign_type == "후광채널":
-            glow_intensity = 2.5
+            # 후광채널: 글자 뒤에서만 빛나는 효과
+            # 텍스트 마스크를 사용해서 글자 형태를 따라 빛나는 효과 구현
+            if text_layer is not None and warped_text_full is not None:
+                # warped_text_full은 이미 건물 사진 크기로 변환된 텍스트 레이어
+                # 텍스트 마스크 생성 (건물 사진 크기에서)
+                text_mask_warped = (warped_text_full.sum(axis=2) > 0).astype(np.float32)
+                
+                # 글자 뒤에서 빛나는 효과 (blur 적용) - 글자 윤곽을 따라 빛나도록
+                # 블러를 줄여서 글자 형태를 유지하면서 부드러운 후광 효과
+                backlight_blur = safe_gaussian_blur(text_mask_warped, (51, 51), 20)  # 블러 크기와 강도 줄임
+                backlight_blur = (backlight_blur * 1.2).clip(0, 1.0)  # 밝기 조정 (너무 밝지 않게)
+                backlight_blur_3ch = np.stack([backlight_blur, backlight_blur, backlight_blur], axis=2)
+                
+                # 배경은 어둡게, 글자 뒤에서만 빛나는 효과 추가
+                base_night = night_base * (1 - combined_mask)
+                # 간판 배경은 어둡게
+                signboard_dark = warped_sign.astype(np.float32) * combined_mask * 0.25
+                # 글자 뒤 빛 효과 (밝은 흰색/노란색 glow) - 글자 마스크 영역에만 적용
+                # 글자 형태를 따라 빛나도록 적절한 밝기로 설정
+                backlight_glow = backlight_blur_3ch * 150.0  # 밝기 조정 (200에서 150으로 줄임)
+                
+                # 글자 영역에서 야간 효과를 절반 제거 (후광 때문에 글자가 더 밝게 보이도록)
+                # 주간 이미지에서 텍스트 부분 추출
+                text_mask_3ch = np.stack([text_mask_warped, text_mask_warped, text_mask_warped], axis=2)
+                # 주간 결과 이미지에서 텍스트 부분 추출
+                day_text = day_result.astype(np.float32) * text_mask_3ch
+                # 텍스트 영역에서 야간 효과를 50% 제거 (주간 밝기로 50% 복원)
+                text_restore_mask = text_mask_3ch * 0.5  # 50%만 복원
+                night_with_text_restore = base_night + signboard_dark + backlight_glow
+                # 텍스트 영역을 50% 주간 밝기로 복원
+                night_result = night_with_text_restore * (1 - text_restore_mask) + day_text * text_restore_mask
+                night_result = np.clip(night_result, 0, 255).astype(np.uint8)
+            else:
+                # 이미지 업로드 방식: 전체 간판에 발광 효과
+                glow_intensity = 2.5
+                night_result = night_base * (1 - combined_mask) + warped_sign.astype(np.float32) * combined_mask * glow_intensity
         elif sign_type == "전후광채널":
             glow_intensity = 2.0
+            night_result = night_base * (1 - combined_mask) + warped_sign.astype(np.float32) * combined_mask * glow_intensity
         elif sign_type == "LED채널":
             glow_intensity = 3.0
+            night_result = night_base * (1 - combined_mask) + warped_sign.astype(np.float32) * combined_mask * glow_intensity
         elif sign_type == "플렉스":
             glow_intensity = 2.2  # 전체 발광
+            night_result = night_base * (1 - combined_mask) + warped_sign.astype(np.float32) * combined_mask * glow_intensity
         elif sign_type == "스카시":
             # 비조명: 야간에는 전체를 어둡게(배경과 동일 수준)
             glow_intensity = 0.3
+            night_result = night_base * (1 - combined_mask) + warped_sign.astype(np.float32) * combined_mask * glow_intensity
         else:
             glow_intensity = 1.8
-        
-        # 간판 밝게 (발광 효과)
-        # combined_mask 사용 (투명도 고려)
-        night_result = night_base * (1 - combined_mask) + warped_sign.astype(np.float32) * combined_mask * glow_intensity
+            night_result = night_base * (1 - combined_mask) + warped_sign.astype(np.float32) * combined_mask * glow_intensity
 
     # 조명 합성 (간판 표면 집중)
     if lights_enabled and lights:
