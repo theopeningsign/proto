@@ -40,6 +40,25 @@ function App() {
   const getCurrentSignboard = () =>
     signboards.find((sb) => sb.id === currentSignboardId) || null;
 
+  const handleDeleteSignboard = (signboardId) => {
+    if (signboards.length <= 1) {
+      alert('간판은 최소 1개 이상 있어야 합니다.');
+      return;
+    }
+
+    const newSignboards = signboards.filter((sb) => sb.id !== signboardId);
+    setSignboards(newSignboards);
+
+    // 삭제된 간판이 현재 선택된 간판이면 다른 간판으로 전환
+    if (currentSignboardId === signboardId) {
+      if (newSignboards.length > 0) {
+        setCurrentSignboardId(newSignboards[0].id);
+      } else {
+        setCurrentSignboardId(null);
+      }
+    }
+  };
+
   // 조명 켜기/끄기 시 자동 반영
   useEffect(() => {
     // 첫 렌더링 시에는 실행하지 않음
@@ -282,18 +301,35 @@ function App() {
             <div className="bg-white/5 border border-white/10 rounded-xl p-3 flex items-center justify-between">
               <div className="flex flex-wrap gap-2">
                 {signboards.map((sb, idx) => (
-                  <button
+                  <div
                     key={sb.id}
-                    type="button"
-                    onClick={() => setCurrentSignboardId(sb.id)}
-                    className={`px-3 py-1 rounded-lg text-xs border transition-colors ${
-                      currentSignboardId === sb.id
-                        ? 'bg-blue-500 border-blue-400 text-white'
-                        : 'bg-black/40 border-white/20 text-gray-200 hover:border-blue-400'
-                    }`}
+                    className="flex items-center gap-1"
                   >
-                    {sb.name || `간판 ${idx + 1}`}
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => setCurrentSignboardId(sb.id)}
+                      className={`px-3 py-1 rounded-lg text-xs border transition-colors ${
+                        currentSignboardId === sb.id
+                          ? 'bg-blue-500 border-blue-400 text-white'
+                          : 'bg-black/40 border-white/20 text-gray-200 hover:border-blue-400'
+                      }`}
+                    >
+                      {sb.name || `간판 ${idx + 1}`}
+                    </button>
+                    {signboards.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteSignboard(sb.id);
+                        }}
+                        className="px-1.5 py-1 rounded text-xs bg-red-500/80 hover:bg-red-500 text-white transition-colors"
+                        title="간판 삭제"
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
                 ))}
               </div>
               <button

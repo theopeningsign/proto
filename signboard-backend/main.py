@@ -653,29 +653,11 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
     Returns: signboard_image (전광채널은 tuple로 (signboard, text_layer) 반환)
     Returns: (signboard_image, text_layer, text_width, text_height) - 텍스트 크기 정보 포함
     """
-    # 배경 생성 (설치 방식에 따라)
+    # 배경 생성 (설치 방식에 따라) - 프레임바는 텍스트 크기 측정 후에 그려야 함
+    is_frame_bar = (installation_type == "프레임바")
     if installation_type == "프레임바":
-        # 프레임바: 투명 배경 + 얇은 알루미늄 막대
+        # 프레임바: 투명 배경 (나중에 텍스트 크기 측정 후 막대 그리기)
         signboard = Image.new('RGBA', (width, height), (0, 0, 0, 0))  # 투명 배경
-        draw = ImageDraw.Draw(signboard)
-        
-        # 얇은 프레임바 (높이의 15% 정도)
-        bar_height = max(20, int(height * 0.15))
-        bar_y = (height - bar_height) // 2
-        
-        # 알루미늄 막대 (은색, 약간 어두운 회색)
-        bar_color = (120, 120, 130)
-        draw.rectangle([0, bar_y, width, bar_y + bar_height], fill=bar_color)
-        
-        # 막대 입체감 (상단 하이라이트)
-        draw.rectangle([0, bar_y, width, bar_y + 2], fill=(160, 160, 170))
-        # 막대 하단 그림자
-        draw.rectangle([0, bar_y + bar_height - 2, width, bar_y + bar_height], fill=(80, 80, 90))
-        
-        # RGB로 변환 (투명 부분은 검은색으로)
-        bg = Image.new('RGB', (width, height), (0, 0, 0))
-        bg.paste(signboard, (0, 0), signboard)
-        signboard = bg
     elif installation_type == "전면프레임":
         # 전면프레임: 사용자 지정 배경색 + 얇은 프레임
         bg_rgb = hex_to_rgb(bg_color) if bg_color.startswith('#') else (107, 45, 143)
@@ -718,20 +700,54 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
             return signboard_np, None
         return signboard_np
     
-    # 폰트 로드
-    font = get_korean_font(font_size)
+    # 폰트 크기 자동 조정: 텍스트가 영역 안에 들어가도록
+    min_font_size = 20  # 최소 폰트 크기
+    current_font_size = font_size
+    text_width = 0
+    text_height = 0
+    font = None
     
-    # 텍스트 위치 계산
+    # 텍스트가 영역 안에 들어갈 때까지 폰트 크기 조정
     draw_temp = ImageDraw.Draw(Image.new('RGB', (width, height)))
-    
-    if text_direction == "vertical":
-        text_vertical = '\n'.join(list(text))
-        bbox = draw_temp.multiline_textbbox((0, 0), text_vertical, font=font)
+    # 프레임바인 경우 더 여유있게 (텍스트가 프레임바 안에 완전히 들어가야 함)
+    if is_frame_bar:
+        min_padding_x = int(width * 0.1)   # 좌우 여백 더 여유있게
+        min_padding_y = int(height * 0.1)  # 상하 여백 더 여유있게
     else:
-        bbox = draw_temp.textbbox((0, 0), text, font=font)
+        min_padding_x = int(width * 0.05)
+        min_padding_y = int(height * 0.05)
+    max_text_width = width - (min_padding_x * 2)
+    max_text_height = height - (min_padding_y * 2)
     
-    text_width = bbox[2] - bbox[0]
-    text_height = bbox[3] - bbox[1]
+    while current_font_size >= min_font_size:
+        font = get_korean_font(current_font_size)
+        
+        if text_direction == "vertical":
+            text_vertical = '\n'.join(list(text))
+            bbox = draw_temp.multiline_textbbox((0, 0), text_vertical, font=font)
+        else:
+            bbox = draw_temp.textbbox((0, 0), text, font=font)
+        
+        text_width = bbox[2] - bbox[0]
+        text_height = bbox[3] - bbox[1]
+        
+        # 텍스트가 영역 안에 들어가는지 확인
+        if text_width <= max_text_width and text_height <= max_text_height:
+            break
+        
+        # 폰트 크기 줄이기
+        current_font_size -= 2
+        if current_font_size < min_font_size:
+            current_font_size = min_font_size
+            font = get_korean_font(current_font_size)
+            if text_direction == "vertical":
+                text_vertical = '\n'.join(list(text))
+                bbox = draw_temp.multiline_textbbox((0, 0), text_vertical, font=font)
+            else:
+                bbox = draw_temp.textbbox((0, 0), text, font=font)
+            text_width = bbox[2] - bbox[0]
+            text_height = bbox[3] - bbox[1]
+            break
     
     # text_position_x, text_position_y 사용 (간판 내에서의 위치, 0-100%)
     # 0% ~ 100% 를 간판 영역 전체에 가깝게 사용하도록 재매핑
@@ -739,8 +755,13 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
     text_pos_y_clamped = max(0, min(100, text_position_y))
 
     # 최소 패딩: 텍스트가 잘리지 않도록 약간의 여백
-    min_padding_y = int(height * 0.05)
-    min_padding_x = int(width * 0.05)
+    # 프레임바인 경우 더 여유있게 (텍스트가 프레임바 안에 들어가야 함)
+    if is_frame_bar:
+        min_padding_y = int(height * 0.1)  # 프레임바는 더 여유있게
+        min_padding_x = int(width * 0.1)   # 좌우 여백도 더 여유있게
+    else:
+        min_padding_y = int(height * 0.05)
+        min_padding_x = int(width * 0.05)
 
     # 세로 방향 사용 가능 영역 (텍스트 실제 높이 고려)
     usable_height = height - (min_padding_y * 2) - text_height
@@ -760,6 +781,65 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
     
     position = (x_offset, y_offset)
     
+    # 프레임바인 경우: 텍스트 위치를 기준으로 프레임바를 중앙에 배치
+    # 실제 텍스트 렌더링 위치를 정확히 계산하기 위해 실제 bbox를 다시 측정
+    if is_frame_bar:
+        # 프레임바 굵기: 글자 높이의 15-20% (최소 3px, 최대 20px)
+        bar_height = max(3, min(20, int(text_height * 0.18)))
+        
+        # 실제 렌더링 위치에서 텍스트 bbox를 다시 측정
+        # position은 (x_offset, y_offset)이고, 이게 draw.text()의 baseline 위치
+        # textbbox를 position 기준으로 다시 측정하면 실제 텍스트 위치를 알 수 있음
+        if text_direction == "vertical":
+            text_vertical = '\n'.join(list(text))
+            actual_bbox = draw_temp.multiline_textbbox(position, text_vertical, font=font)
+        else:
+            actual_bbox = draw_temp.textbbox(position, text, font=font)
+        
+        # 실제 텍스트의 상단과 하단
+        text_actual_top = actual_bbox[1]
+        text_actual_bottom = actual_bbox[3]
+        text_center_y = (text_actual_top + text_actual_bottom) // 2
+        
+        # 프레임바를 텍스트 중앙에 맞춤
+        bar_y = text_center_y - bar_height // 2
+        
+        # 프레임바가 영역을 벗어나지 않도록 조정
+        if bar_y < 0:
+            bar_y = 0
+        elif bar_y + bar_height > height:
+            bar_y = height - bar_height
+        
+        # 프레임바 길이: 텍스트 너비 + 양옆으로 조금씩 튀어나오기
+        # 텍스트의 실제 좌우 위치
+        text_actual_left = actual_bbox[0]
+        text_actual_right = actual_bbox[2]
+        text_actual_width = text_actual_right - text_actual_left
+        
+        # 양옆으로 튀어나올 길이 (텍스트 너비의 10-15% 또는 최소 20px)
+        bar_padding = max(20, int(text_actual_width * 0.12))
+        bar_left = max(0, text_actual_left - bar_padding)
+        bar_right = min(width, text_actual_right + bar_padding)
+        bar_width = bar_right - bar_left
+        
+        # 알루미늄 막대 (은색, 약간 어두운 회색)
+        bar_color = (120, 120, 130, 255)
+        draw = ImageDraw.Draw(signboard)
+        draw.rectangle([bar_left, bar_y, bar_right, bar_y + bar_height], fill=bar_color)
+        
+        # 막대 입체감 (상단 하이라이트)
+        draw.rectangle([bar_left, bar_y, bar_right, bar_y + 2], fill=(160, 160, 170, 255))
+        # 막대 하단 그림자
+        draw.rectangle([bar_left, bar_y + bar_height - 2, bar_right, bar_y + bar_height], fill=(80, 80, 90, 255))
+        
+        # RGB로 변환 (투명 부분은 검은색으로)
+        bg = Image.new('RGB', (width, height), (0, 0, 0))
+        bg.paste(signboard, (0, 0), signboard)
+        signboard = bg
+        
+        # signboard_np 업데이트 (프레임바가 그려진 후)
+        signboard_np = cv2.cvtColor(np.array(signboard), cv2.COLOR_RGB2BGR)
+    
     # 간판 종류에 따라 렌더링
     text_rgb = hex_to_rgb(text_color) if text_color.startswith('#') else (255, 255, 255)
     
@@ -776,8 +856,25 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
         text_with_glow = cv2.add(text_layer_bgr, text_glow)
         
         day_result = signboard_np.copy()
-        day_result = cv2.add(day_result, text_layer_bgr)
-        day_result = cv2.addWeighted(day_result, 1.0, text_glow, 0.5, 0)
+        
+        # 프레임바인 경우: 텍스트가 프레임바 위에 완전히 덮이도록 alpha 마스크 사용
+        if is_frame_bar:
+            # 텍스트 alpha 채널 추출
+            text_alpha = text_layer_rgba[:, :, 3].astype(np.float32) / 255.0
+            text_alpha_3ch = np.stack([text_alpha, text_alpha, text_alpha], axis=2)
+            
+            # 텍스트 영역은 텍스트로, 나머지는 배경으로
+            day_result = day_result.astype(np.float32) * (1 - text_alpha_3ch) + text_layer_bgr.astype(np.float32) * text_alpha_3ch
+            day_result = day_result.astype(np.uint8)
+            
+            # glow 효과 추가 (텍스트 영역에만)
+            text_glow_masked = text_glow.astype(np.float32) * text_alpha_3ch * 0.5
+            day_result = day_result.astype(np.float32) + text_glow_masked
+            day_result = np.clip(day_result, 0, 255).astype(np.uint8)
+        else:
+            # 기존 방식 (다른 간판 종류)
+            day_result = cv2.add(day_result, text_layer_bgr)
+            day_result = cv2.addWeighted(day_result, 1.0, text_glow, 0.5, 0)
         
         # 프레임바/맨벽은 입체감 적게
         if installation_type in ["프레임바", "맨벽"]:
@@ -795,7 +892,7 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
         
         if sign_type == "후광채널":
             # 후광: 뒤에만
-            text_mask = create_text_mask(text_to_render, font_size)
+            text_mask = create_text_mask(text_to_render, font, (width, height), position)
             backlight = safe_gaussian_blur(text_mask, (81, 81), 40)
             signboard_np = cv2.add(signboard_np.astype(np.float32), backlight.astype(np.float32)).astype(np.uint8)
         elif sign_type == "전후광채널":
