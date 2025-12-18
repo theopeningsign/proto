@@ -107,7 +107,31 @@ def extract_text_layer(text: str, font, color: tuple, canvas_size: tuple, positi
     text_img = Image.new('RGBA', canvas_size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(text_img)
     draw.text(position, text, fill=color + (255,), font=font)
-    return np.array(text_img)
+
+    # 텍스트 상단-좌측 그라디언트 하이라이트 (아주 미묘하게)
+    try:
+        np_img = np.array(text_img)
+        alpha = np_img[:, :, 3]
+        ys, xs = np.where(alpha > 0)
+        if len(xs) > 0 and len(ys) > 0:
+            x_min, x_max = xs.min(), xs.max()
+            y_min, y_max = ys.min(), ys.max()
+            h = y_max - y_min + 1
+            w = x_max - x_min + 1
+
+            # 왼쪽 위 1/4 영역만 10% 밝게
+            y_end = int(y_min + h * 0.25)
+            x_end = int(x_min + w * 0.25)
+
+            # RGB 채널만 살짝 밝게 (알파는 그대로)
+            region = np_img[y_min:y_end, x_min:x_end, :3].astype(np.float32)
+            region = np.clip(region * 1.1, 0, 255)
+            np_img[y_min:y_end, x_min:x_end, :3] = region.astype(np.uint8)
+
+        return np_img
+    except Exception:
+        # 하이라이트 계산 중 오류가 나도 기본 텍스트 렌더링은 유지
+        return np.array(text_img)
 
 def create_text_mask(text: str, font, canvas_size: tuple, position: tuple) -> np.ndarray:
     """텍스트 마스크 생성"""
@@ -197,7 +221,8 @@ def add_3d_depth(image_np: np.ndarray, depth: int = 8) -> np.ndarray:
     
     # 그림자 blur
     shadow_blur = safe_gaussian_blur(shadow, (15, 15), 5)
-    shadow_blur = (shadow_blur * 0.3).astype(np.uint8)
+    # 그림자 투명도 살짝 강화 (약 55% 수준)
+    shadow_blur = (shadow_blur * 0.55).astype(np.uint8)
     
     # 원본 이미지를 그림자 위에 배치
     result = shadow_blur.copy()
@@ -551,6 +576,99 @@ def render_facade(text: str, bg_color: str, text_color: str, logo_img: Image.Ima
     
     return result
 
+def render_awning_signboard(text: str, bg_color: str, text_color: str, logo_img: Image.Image = None, text_direction: str = "horizontal", width: int = 1200, height: int = 300) -> np.ndarray:
+    """
+    어닝간판: 정면에서 본 간단한 어닝(천막) 표현
+    - 위쪽: 천막 앞면 (사다리꼴 + 그라디언트로 약간 입체감)
+    - 상단: 설치 봉(막대)
+    - 텍스트: 앞면 오른쪽 아래에 작게 배치 (실제 시안처럼)
+    """
+    # 기본 색상
+    base_rgb = hex_to_rgb(bg_color) if bg_color.startswith('#') else (200, 80, 60)
+    r, g, b = base_rgb
+
+    # 전체 배경은 투명으로 시작 (벽이 비치도록)
+    signboard = Image.new('RGBA', (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(signboard)
+
+    # 상단 설치 봉(막대)
+    rod_height = max(2, int(height * 0.08))
+    rod_color = (230, 230, 235, 255)
+    shadow_color = (120, 120, 130, 255)
+    draw.rectangle([0, 0, width, rod_height], fill=rod_color)
+    # 막대 아래 얇은 그림자
+    draw.rectangle([0, rod_height, width, rod_height + 2], fill=shadow_color)
+
+    # 어닝 앞면(사다리꼴) 영역
+    top_y = rod_height + 2
+    bottom_y = height - 1
+    front_h = max(1, bottom_y - top_y + 1)
+
+    # 좌측/우측 깊이 (사다리꼴 모양)
+    left_depth = int(width * 0.10)   # 좌측이 더 멀리 있는 느낌
+    right_depth = int(width * 0.04)  # 우측은 덜 기울어지게
+
+    # 앞면 그라디언트 + 사다리꼴 형태로 라인 그리기
+    for yi in range(front_h):
+        y = top_y + yi
+        t = yi / max(1, front_h - 1)  # 0 위쪽, 1 아래쪽
+
+        # 사다리꼴의 좌/우 x 위치
+        x_left = int(left_depth * t)  # 아래쪽으로 갈수록 더 안쪽으로
+        x_right = int(width - right_depth * (1.0 - t))
+
+        # 색 그라디언트: 위는 밝게, 아래는 기본색에 가까이
+        factor = 1.0 + 0.18 * (1.0 - t)
+        rr = int(max(0, min(255, r * factor)))
+        gg = int(max(0, min(255, g * factor)))
+        bb = int(max(0, min(255, b * factor)))
+
+        draw.line([(x_left, y), (x_right, y)], fill=(rr, gg, bb, 255))
+
+    # 좌측 전면 모서리를 약간 라운딩된 느낌으로 어둡게 처리
+    edge_shadow = (int(r * 0.4), int(g * 0.4), int(b * 0.4), 255)
+    for yi in range(front_h // 2):
+        y = top_y + yi
+        draw.point((left_depth * yi / max(1, front_h // 2), y), fill=edge_shadow)
+
+    # 전면 하단 엣지에 얇은 하이라이트/그림자 라인
+    fold_y = bottom_y - 1
+    if fold_y > top_y:
+        highlight = (min(255, r + 35), min(255, g + 35), min(255, b + 35), 255)
+        draw.line([(left_depth, fold_y), (width, fold_y)], fill=highlight, width=1)
+        if fold_y + 1 < height:
+            shadow_line = (int(r * 0.35), int(g * 0.35), int(b * 0.35), 255)
+            draw.line([(left_depth, fold_y + 1), (width, fold_y + 1)], fill=shadow_line, width=1)
+
+    # 텍스트가 없으면 어닝 형태만 반환
+    signboard_rgb = Image.new('RGB', (width, height), (0, 0, 0))
+    signboard_rgb.paste(signboard, (0, 0), signboard)
+    signboard_np = cv2.cvtColor(np.array(signboard_rgb), cv2.COLOR_RGB2BGR)
+    if not text or not text.strip():
+        return signboard_np
+
+    # 텍스트 렌더링 (앞면 오른쪽 아래에 작게)
+    # 어닝 앞면 높이에 비례해서 글자 크기를 조정
+    approx_font_size = max(18, min(72, int(front_h * 0.30)))
+    font = get_korean_font(approx_font_size)
+    draw_temp = ImageDraw.Draw(Image.new('RGB', (width, height)))
+    bbox = draw_temp.textbbox((0, 0), text, font=font)
+    text_width = bbox[2] - bbox[0]
+    text_height = bbox[3] - bbox[1]
+    # 텍스트는 앞면 오른쪽 아래 모서리 쪽에 작게 배치
+    margin_x = int(width * 0.06)
+    margin_y_bottom = int(front_h * 0.18)
+    text_x = max(left_depth + 5, width - margin_x - text_width)
+    text_y = max(top_y + 5, bottom_y - margin_y_bottom - text_height)
+    position = (text_x, text_y)
+
+    text_rgb = hex_to_rgb(text_color) if text_color.startswith('#') else (255, 255, 255)
+    text_layer_rgba = extract_text_layer(text, font, text_rgb, (width, height), position)
+    text_layer_bgr = cv2.cvtColor(text_layer_rgba, cv2.COLOR_RGBA2BGR)
+
+    result = cv2.add(signboard_np, text_layer_bgr)
+    return result
+
 # ========== 기타 간판 ==========
 
 def render_flex_signboard(text: str, bg_color: str, text_color: str, logo_img: Image.Image = None, text_direction: str = "horizontal", width: int = 1200, height: int = 300) -> np.ndarray:
@@ -857,6 +975,16 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
     
     # 간판 종류에 따라 렌더링
     text_rgb = hex_to_rgb(text_color) if text_color.startswith('#') else (255, 255, 255)
+
+    # 검은색/매우 어두운 텍스트 색상 처리:
+    # composite_signboard의 transparency_mask(밝기 30 미만 투명 처리)에 걸려서
+    # 글자가 사라지는 문제를 막기 위해, 아주 약간 밝은 회색으로 올려줌.
+    try:
+        if sum(text_rgb) < 30:  # RGB 합이 30 미만이면 거의 검정으로 간주
+            text_rgb = (35, 35, 35)  # 투명 threshold(30)보다 살짝 높은 아주 어두운 회색
+            print(f"[DEBUG] 검은색 텍스트 감지 → {text_rgb}로 조정")
+    except Exception:
+        pass
     
     if text_direction == "vertical":
         text_to_render = '\n'.join(list(text))
@@ -864,9 +992,26 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
         text_to_render = text
     
     if sign_type == "전광채널":
-        # 전광: 글자만 발광
+        # 전광채널 주간: 후광채널과 동일하게 "앞면 + 3D"만 사용 (glow 없음)
         text_layer_rgba = extract_text_layer(text_to_render, font, text_rgb, (width, height), position)
         text_layer_bgr = cv2.cvtColor(text_layer_rgba, cv2.COLOR_RGBA2BGR)
+
+        # 후광채널과 동일: 배경 + 텍스트 합성만
+        day_result = cv2.add(signboard_np, text_layer_bgr)
+
+        # 3D 입체감 (후광과 동일 depth=6)
+        day_result = add_3d_depth(day_result, depth=6)
+
+        # 야간용 text_layer 는 그대로 반환 (후광채널과 동일)
+        return day_result, text_layer_bgr
+
+        # 3) 텍스트 그림자 레이어 (검은색, 오른쪽 아래로 7px offset, 40% 투명도)
+        shadow_color = (0, 0, 0)
+        shadow_position = (position[0] + 7, position[1] + 7)
+        shadow_layer_rgba = extract_text_layer(text_to_render, font, shadow_color, (width, height), shadow_position)
+        shadow_layer_bgr = cv2.cvtColor(shadow_layer_rgba, cv2.COLOR_RGBA2BGR)
+
+        # glow는 앞면 기준으로만 계산
         text_glow = safe_gaussian_blur(text_layer_bgr, (25, 25), 10)
         text_with_glow = cv2.add(text_layer_bgr, text_glow)
         
@@ -874,51 +1019,94 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
         
         # 프레임바인 경우: 텍스트가 프레임바 위에 완전히 덮이도록 alpha 마스크 사용
         if is_frame_bar:
-            # 텍스트 alpha 채널 추출
+            # 그림자 alpha 채널 추출 (40% 강도로 적용)
+            shadow_alpha = (shadow_layer_rgba[:, :, 3].astype(np.float32) / 255.0) * 0.4
+            shadow_alpha_3ch = np.stack([shadow_alpha, shadow_alpha, shadow_alpha], axis=2)
+
+            # 옆면 alpha 채널 추출
+            side_alpha = side_layer_rgba[:, :, 3].astype(np.float32) / 255.0
+            side_alpha_3ch = np.stack([side_alpha, side_alpha, side_alpha], axis=2)
+
+            # 앞면 alpha 채널 추출
             text_alpha = text_layer_rgba[:, :, 3].astype(np.float32) / 255.0
             text_alpha_3ch = np.stack([text_alpha, text_alpha, text_alpha], axis=2)
             
-            # 텍스트 영역은 텍스트로, 나머지는 배경으로
-            day_result = day_result.astype(np.float32) * (1 - text_alpha_3ch) + text_layer_bgr.astype(np.float32) * text_alpha_3ch
-            day_result = day_result.astype(np.uint8)
+            day_result = day_result.astype(np.float32)
+
+            # 1) 그림자 먼저
+            day_result = day_result * (1 - shadow_alpha_3ch) + shadow_layer_bgr.astype(np.float32) * shadow_alpha_3ch
+            # 2) 옆면
+            day_result = day_result * (1 - side_alpha_3ch) + side_layer_bgr.astype(np.float32) * side_alpha_3ch
+            # 3) 그 위에 앞면
+            day_result = day_result * (1 - text_alpha_3ch) + text_layer_bgr.astype(np.float32) * text_alpha_3ch
             
             # glow 효과 추가 (텍스트 영역에만)
             text_glow_masked = text_glow.astype(np.float32) * text_alpha_3ch * 0.5
-            day_result = day_result.astype(np.float32) + text_glow_masked
+            day_result = day_result + text_glow_masked
             day_result = np.clip(day_result, 0, 255).astype(np.uint8)
         else:
-            # 기존 방식 (다른 간판 종류)
-            day_result = cv2.add(day_result, text_layer_bgr)
-            day_result = cv2.addWeighted(day_result, 1.0, text_glow, 0.5, 0)
+            # 기존 방식 (다른 간판 종류) + 그림자/옆면 레이어 추가
+            # 그림자 40% 투명도로 먼저 합성
+            shadow_alpha = (shadow_layer_rgba[:, :, 3].astype(np.float32) / 255.0) * 0.4
+            shadow_alpha_3ch = np.stack([shadow_alpha, shadow_alpha, shadow_alpha], axis=2)
+            day_f = day_result.astype(np.float32)
+            day_f = day_f * (1 - shadow_alpha_3ch) + shadow_layer_bgr.astype(np.float32) * shadow_alpha_3ch
+
+            # 옆면과 앞면은 기존대로 add 순서 유지
+            day_f = cv2.add(day_f.astype(np.uint8), side_layer_bgr)   # 옆면
+            day_f = cv2.add(day_f, text_layer_bgr)                    # 앞면
+            day_result = cv2.addWeighted(day_f, 1.0, text_glow, 0.5, 0)
         
         # 프레임바/맨벽은 입체감 적게
         if installation_type in ["프레임바", "맨벽"]:
-            day_result = add_3d_depth(day_result, depth=3)
-            text_with_glow_3d = add_3d_depth(text_with_glow, depth=3)
+            day_result = add_3d_depth(day_result, depth=5)
+            text_with_glow_3d = add_3d_depth(text_with_glow, depth=5)
         else:
-            day_result = add_3d_depth(day_result, depth=6)
-            text_with_glow_3d = add_3d_depth(text_with_glow, depth=6)
+            day_result = add_3d_depth(day_result, depth=10)
+            text_with_glow_3d = add_3d_depth(text_with_glow, depth=10)
         return day_result, text_with_glow_3d
     
     elif sign_type in ["후광채널", "전후광채널"]:
         # 발광 간판: 후광/전후광
+        # 1) 텍스트 앞면(원본 색상)
         text_layer_rgba = extract_text_layer(text_to_render, font, text_rgb, (width, height), position)
         text_layer_bgr = cv2.cvtColor(text_layer_rgba, cv2.COLOR_RGBA2BGR)
-        
+
+        # 2) 텍스트 옆면(원본보다 50% 더 어두운 색상, 오른쪽 아래로 대각선 offset)
+        side_color = tuple(int(c * 0.5) for c in text_rgb)
+        side_offset_x = 2
+        side_offset_y = 1
+        side_position = (position[0] + side_offset_x, position[1] + side_offset_y)
+        side_layer_rgba = extract_text_layer(text_to_render, font, side_color, (width, height), side_position)
+        side_layer_bgr = cv2.cvtColor(side_layer_rgba, cv2.COLOR_RGBA2BGR)
+
+        # 3) 텍스트 그림자 레이어 (검은색, 오른쪽 아래로 7px offset, 40% 투명도)
+        shadow_color = (0, 0, 0)
+        shadow_position = (position[0] + 7, position[1] + 7)
+        shadow_layer_rgba = extract_text_layer(text_to_render, font, shadow_color, (width, height), shadow_position)
+        shadow_layer_bgr = cv2.cvtColor(shadow_layer_rgba, cv2.COLOR_RGBA2BGR)
+
+        day_result = signboard_np.copy()
+
+        # 그림자 alpha (40%) 적용
+        shadow_alpha = (shadow_layer_rgba[:, :, 3].astype(np.float32) / 255.0) * 0.4
+        shadow_alpha_3ch = np.stack([shadow_alpha, shadow_alpha, shadow_alpha], axis=2)
+        day_f = day_result.astype(np.float32)
+        day_f = day_f * (1 - shadow_alpha_3ch) + shadow_layer_bgr.astype(np.float32) * shadow_alpha_3ch
+
+        # 옆면, 앞면 합성
+        day_f = cv2.add(day_f.astype(np.uint8), side_layer_bgr)
+        day_f = cv2.add(day_f, text_layer_bgr)
+
         if sign_type == "후광채널":
-            # 후광채널: 주간에는 일반 채널 간판과 동일 (후광 효과 없음)
-            # 야간에만 글자 뒤에서 빛나는 효과 (composite_signboard에서 처리)
-            # 주간에는 그냥 텍스트만 추가
-            result = cv2.add(signboard_np, text_layer_bgr)
-        elif sign_type == "전후광채널":
+            # 후광채널: 주간에는 glow 없이 3D 텍스트만
+            result = day_f
+        else:
             # 전후광채널: 주간에는 전광채널처럼 약한 glow 효과 추가
-            # 야간에만 글자 앞/뒤에서 빛나는 효과 (composite_signboard에서 처리)
             text_glow = safe_gaussian_blur(text_layer_bgr, (25, 25), 10)
-            result = signboard_np.copy()
-            result = cv2.add(result, text_layer_bgr)
-            result = cv2.addWeighted(result, 1.0, text_glow, 0.5, 0)
+            result = cv2.addWeighted(day_f, 1.0, text_glow, 0.5, 0)
         
-        result = add_3d_depth(result, depth=6)
+        result = add_3d_depth(result, depth=8)
         
         # 후광채널/전후광채널일 때 text_layer 반환 (야간 효과 구현용)
         if sign_type in ["후광채널", "전후광채널"]:
@@ -927,10 +1115,47 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
     
     elif sign_type == "스카시":
         # 스카시: 비조명 입체
-        draw = ImageDraw.Draw(signboard)
-        draw.text(position, text_to_render, fill=text_rgb, font=font)
-        result_np = cv2.cvtColor(np.array(signboard), cv2.COLOR_RGB2BGR)
-        result = add_3d_depth(result_np, depth=8)
+        # 1) 텍스트 앞면
+        text_layer_rgba = extract_text_layer(text_to_render, font, text_rgb, (width, height), position)
+        text_layer_bgr = cv2.cvtColor(text_layer_rgba, cv2.COLOR_RGBA2BGR)
+
+        # 2) 텍스트 옆면 (원본보다 50% 더 어두운 색상, 오른쪽 아래로 대각선 offset)
+        side_color = tuple(int(c * 0.5) for c in text_rgb)
+        side_offset_x = 2
+        side_offset_y = 1
+        side_position = (position[0] + side_offset_x, position[1] + side_offset_y)
+        side_layer_rgba = extract_text_layer(text_to_render, font, side_color, (width, height), side_position)
+        side_layer_bgr = cv2.cvtColor(side_layer_rgba, cv2.COLOR_RGBA2BGR)
+
+        # 3) 텍스트 그림자 (검은색, 오른쪽 아래로 7px offset, 40% 투명도)
+        shadow_color = (0, 0, 0)
+        shadow_position = (position[0] + 7, position[1] + 7)
+        shadow_layer_rgba = extract_text_layer(text_to_render, font, shadow_color, (width, height), shadow_position)
+        shadow_layer_bgr = cv2.cvtColor(shadow_layer_rgba, cv2.COLOR_RGBA2BGR)
+
+        result_f = signboard_np.copy().astype(np.float32)
+
+        # 그림자 alpha (40%) 적용
+        shadow_alpha = (shadow_layer_rgba[:, :, 3].astype(np.float32) / 255.0) * 0.4
+        shadow_alpha_3ch = np.stack([shadow_alpha, shadow_alpha, shadow_alpha], axis=2)
+        result_f = result_f * (1 - shadow_alpha_3ch) + shadow_layer_bgr.astype(np.float32) * shadow_alpha_3ch
+
+        # 옆면, 앞면 합성
+        result_f = cv2.add(result_f.astype(np.uint8), side_layer_bgr)
+        result_f = cv2.add(result_f, text_layer_bgr)
+
+        # 살짝 하이라이트 추가 (기존 스카시 느낌 유지)
+        highlight_pos = (position[0] - 1, position[1] - 1)
+        highlight_rgb = tuple(min(255, c + 30) for c in text_rgb)
+        highlight_layer_rgba = extract_text_layer(text_to_render, font, highlight_rgb, (width, height), highlight_pos)
+        highlight_layer_bgr = cv2.cvtColor(highlight_layer_rgba, cv2.COLOR_RGBA2BGR)
+        result_f = cv2.addWeighted(result_f, 0.95, highlight_layer_bgr, 0.15, 0)
+
+        # 금속/아크릴 질감 노이즈 유지
+        texture = np.random.randint(-3, 3, result_f.shape, dtype=np.int16)
+        result_f = np.clip(result_f.astype(np.int16) + texture, 0, 255).astype(np.uint8)
+
+        result = add_3d_depth(result_f, depth=8)
         return result, None
     
     elif sign_type == "플렉스":
@@ -941,6 +1166,10 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
         glow = safe_gaussian_blur(result_np, (51, 51), 20)
         result = cv2.addWeighted(result_np, 0.7, glow, 0.3, 0)
         result = add_3d_depth(result, depth=6)
+        return result, None
+    elif sign_type == "어닝간판":
+        # 어닝간판: 전용 렌더러 사용 (비조명 간판)
+        result = render_awning_signboard(text, bg_color, text_color, logo_img, text_direction, width, height)
         return result, None
     
     else:
@@ -964,9 +1193,11 @@ def render_signboard(text: str, logo_path: str, logo_type: str, installation_typ
             logo_img = None
     
     # 설치 방식 + 간판 종류 조합으로 렌더링
-    # 전광채널은 항상 text_layer 분리
+    # 전광채널은 주간은 후광채널과 동일한 렌더링을 사용하고,
+    # 야간 합성에서만 전광/후광 차이를 둔다.
     if sign_type == "전광채널":
-        result, text_layer = render_combined_signboard(installation_type, "전광채널", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height)
+        # day 결과와 text_layer를 후광채널과 동일한 코드 경로로 생성
+        result, text_layer = render_combined_signboard(installation_type, "후광채널", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height)
         return result, text_layer
     elif sign_type == "후광채널":
         result, text_layer = render_combined_signboard(installation_type, "후광채널", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height)
@@ -979,6 +1210,9 @@ def render_signboard(text: str, logo_path: str, logo_type: str, installation_typ
         return result, None
     elif sign_type == "플렉스":
         result, _ = render_combined_signboard(installation_type, "플렉스", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height)
+        return result, None
+    elif sign_type == "어닝간판":
+        result, _ = render_combined_signboard(installation_type, "어닝간판", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height)
         return result, None
     else:
         # 기본값: 전광채널
@@ -1164,7 +1398,7 @@ def composite_signboard(
                 text_mask_warped = (warped_text.sum(axis=2) > 0).astype(np.float32)
                 text_mask_warped = np.stack([text_mask_warped, text_mask_warped, text_mask_warped], axis=2)
 
-            # ----- 전광용 night_front 계산 -----
+            # ----- 전광/전후광용 night_front 계산 -----
             warped_bg_dark = warped_bg.astype(np.float32) * 0.25
             base_night_front = night_base * (1 - combined_mask) + warped_bg_dark * combined_mask
             text_contrib = warped_text.astype(np.float32) * text_mask_warped * transparency_mask
@@ -1185,7 +1419,21 @@ def composite_signboard(
 
             # ----- 최종 분기 -----
             if sign_type == "전광채널":
-                night_result = night_front
+                # 전광채널 야간:
+                # - 배경만 어둡게 유지 (night_front의 배경 부분)
+                # - 글자 앞면 색은 "텍스트 레이어 원본 색" 그대로 사용
+                #   (day_result 전체가 아니라, warped_text만 사용해서
+                #    옆면/그림자까지 붉게 번지는 효과는 제거)
+                text_mask_3 = text_mask_warped.astype(np.float32)
+                bg_mask_3 = 1.0 - text_mask_3
+
+                # 야간용 배경: night_front에서 글자 영역 제거
+                night_bg = night_front.astype(np.float32) * bg_mask_3
+
+                # 텍스트 레이어에서 글자 색만 가져오기
+                day_text = warped_text.astype(np.float32) * text_mask_3
+
+                night_result = night_bg + day_text
 
             elif sign_type == "후광채널":
                 # 후광채널: 기존 night_back 로직 그대로 사용

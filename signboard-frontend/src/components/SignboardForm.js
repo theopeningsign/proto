@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 
 const SignboardForm = ({ formData, onFormDataChange, section = 'full' }) => {
-  const [isCollapsed, setIsCollapsed] = useState(false);
 
   const handleChange = (field, value) => {
     onFormDataChange({
@@ -23,20 +22,12 @@ const SignboardForm = ({ formData, onFormDataChange, section = 'full' }) => {
   return (
     <div className="bg-white/5 backdrop-blur-lg border border-white/10 rounded-2xl shadow-2xl p-6">
       {section === 'advanced' ? (
-        <button
-          onClick={() => setIsCollapsed(!isCollapsed)}
-          className="w-full flex items-center justify-between mb-6 text-white hover:text-blue-400 transition-colors"
-        >
-          <h2 className="text-xl font-semibold">세부 옵션</h2>
-          <span className="text-2xl">{isCollapsed ? '▶' : '▼'}</span>
-        </button>
+        <h2 className="text-xl font-semibold mb-6 text-white">세부 옵션</h2>
       ) : (
         <h2 className="text-xl font-semibold mb-6 text-white">
           {section === 'basic' ? '간판 정보' : '간판 정보'}
         </h2>
       )}
-      
-      {(!isCollapsed || section !== 'advanced') && (
       
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {showBasic && (
@@ -238,6 +229,7 @@ const SignboardForm = ({ formData, onFormDataChange, section = 'full' }) => {
             <option value="전후광채널" className="bg-gray-800">전후광채널 (앞+뒤 발광)</option>
             <option value="스카시" className="bg-gray-800">스카시 (비조명 입체)</option>
             <option value="플렉스" className="bg-gray-800">플렉스 (천 재질)</option>
+            <option value="어닝간판" className="bg-gray-800">어닝간판 (천막형)</option>
           </select>
         </div>
         </>
@@ -400,7 +392,6 @@ const SignboardForm = ({ formData, onFormDataChange, section = 'full' }) => {
         </>
         )}
       </div>
-      )}
     </div>
   );
 };
