@@ -736,12 +736,18 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
         min_padding_x = int(width * 0.05)
 
     # 세로 방향 사용 가능 영역 (텍스트 실제 높이 고려)
+    # text_position_y = 50일 때 텍스트의 중심이 간판의 정중앙에 오도록 조정
     usable_height = height - (min_padding_y * 2) - text_height
     if usable_height < 0:
         # 텍스트가 너무 큰 경우: 중앙 고정
         y_offset = (height - text_height) // 2
     else:
-        y_offset = min_padding_y + int((text_pos_y_clamped / 100.0) * usable_height)
+        # text_position_y를 텍스트 중심 기준으로 계산
+        # 50%일 때 텍스트 중심이 간판 정중앙에 오도록
+        text_center_y = min_padding_y + text_height // 2 + int((text_pos_y_clamped / 100.0) * usable_height)
+        y_offset = text_center_y - text_height // 2
+        # 최소 패딩보다 작아지지 않도록 보정
+        y_offset = max(min_padding_y, y_offset)
 
     # 가로 방향 사용 가능 영역 (텍스트 실제 너비 고려)
     usable_width = width - (min_padding_x * 2) - text_width
@@ -1126,14 +1132,16 @@ def composite_signboard(
             
             # 전후광채널인 경우 후광 효과 추가
             if sign_type == "전후광채널":
-                # 후광 효과 추가 (후광채널과 동일)
+                # 후광 효과 추가: 글자 주변에만 적용 (글자 영역은 제외)
                 text_mask_1ch = text_mask_warped[:, :, 0]
                 backlight_blur = safe_gaussian_blur(text_mask_1ch, (51, 51), 20)
                 backlight_blur = (backlight_blur * 1.2).clip(0, 1.0)
                 backlight_blur_3ch = np.stack([backlight_blur, backlight_blur, backlight_blur], axis=2)
                 backlight_glow = backlight_blur_3ch * 150.0
-                # 전광채널 기본 로직 + 후광 효과
-                night_result = np.maximum(base_night, text_contrib) + backlight_glow
+                # 글자 영역을 제외한 주변에만 후광 효과 적용
+                backlight_glow_masked = backlight_glow * (1 - text_mask_warped)
+                # 전광채널 기본 로직 (글자는 그대로) + 글자 주변 후광 효과
+                night_result = np.maximum(base_night, text_contrib) + backlight_glow_masked
                 night_result = np.clip(night_result, 0, 255).astype(np.uint8)
             else:
                 # 전광채널: 기본 로직만
