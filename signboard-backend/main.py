@@ -1216,9 +1216,35 @@ def composite_signboard(
                 night_result = night_with_text_restore * (1 - text_restore_mask) + day_text * text_restore_mask
                 night_result = np.clip(night_result, 0, 255).astype(np.uint8)
             else:
-                # 이미지 업로드 방식: 전체 간판에 발광 효과
-                glow_intensity = 2.5
-                night_result = night_base * (1 - combined_mask) + warped_sign.astype(np.float32) * combined_mask * glow_intensity
+                # 이미지 업로드 방식: 로고 윤곽을 따라 후광 효과 적용
+                # 투명 처리된 이미지의 경우 검은색(0,0,0)이 아닌 부분이 로고 영역
+                # 로고 마스크 생성 (밝은 부분 감지)
+                gray_sign = cv2.cvtColor(warped_sign, cv2.COLOR_BGR2GRAY)
+                # 검은색이 아닌 부분을 로고로 간주 (밝기 10 이상)
+                logo_mask = (gray_sign > 10).astype(np.float32)
+                
+                # 로고 마스크를 블러 처리해서 후광 효과 생성
+                backlight_blur = safe_gaussian_blur(logo_mask, (51, 51), 20)
+                backlight_blur = (backlight_blur * 1.2).clip(0, 1.0)
+                backlight_blur_3ch = np.stack([backlight_blur, backlight_blur, backlight_blur], axis=2)
+                
+                # 배경은 어둡게, 로고 뒤에서만 빛나는 효과 추가
+                base_night = night_base * (1 - combined_mask)
+                # 간판 배경은 어둡게
+                signboard_dark = warped_sign.astype(np.float32) * combined_mask * 0.25
+                # 로고 뒤 빛 효과 (밝은 흰색/노란색 glow)
+                backlight_glow = backlight_blur_3ch * 150.0
+                
+                # 로고 영역에서 야간 효과를 절반 제거 (후광 때문에 로고가 더 밝게 보이도록)
+                logo_mask_3ch = np.stack([logo_mask, logo_mask, logo_mask], axis=2)
+                # 주간 결과 이미지에서 로고 부분 추출
+                day_logo = day_result.astype(np.float32) * logo_mask_3ch
+                # 로고 영역에서 야간 효과를 50% 제거 (주간 밝기로 50% 복원)
+                logo_restore_mask = logo_mask_3ch * 0.5  # 50%만 복원
+                night_with_logo_restore = base_night + signboard_dark + backlight_glow
+                # 로고 영역을 50% 주간 밝기로 복원
+                night_result = night_with_logo_restore * (1 - logo_restore_mask) + day_logo * logo_restore_mask
+                night_result = np.clip(night_result, 0, 255).astype(np.uint8)
         elif sign_type == "플렉스":
             glow_intensity = 2.2  # 전체 발광
             night_result = night_base * (1 - combined_mask) + warped_sign.astype(np.float32) * combined_mask * glow_intensity
