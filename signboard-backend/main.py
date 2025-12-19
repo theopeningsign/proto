@@ -770,6 +770,13 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
     - 후광채널: (signboard, text_layer) - text_layer는 텍스트만 분리 (야간 효과용)
     - 기타: (signboard, None)
     """
+    # 스카시 재질 파싱
+    material = None
+    if sign_type.startswith("스카시_"):
+        material = sign_type.split("_")[1]  # "금속", "아크릴", "고무"
+        sign_type = "스카시"
+        print(f"[DEBUG] Scasi material: {material}")
+    
     # 배경 생성 (설치 방식에 따라) - 프레임바는 텍스트 크기 측정 후에 그려야 함
     is_frame_bar = (installation_type == "프레임바")
     if installation_type == "프레임바":
@@ -955,49 +962,95 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
         bar_right = min(width, text_actual_right + bar_padding)
         bar_width = bar_right - bar_left
         
-        # 알루미늄 막대 (은색, 약간 어두운 회색)
-        bar_color = (120, 120, 130, 255)
-        draw = ImageDraw.Draw(signboard)
-        draw.rectangle([bar_left, bar_y, bar_right, bar_y + bar_height], fill=bar_color)
+        # 텍스트 색상 계산 (프레임바 마스킹을 위해 먼저 필요)
+        text_rgb = hex_to_rgb(text_color) if text_color.startswith('#') else (255, 255, 255)
         
-        # 막대 입체감 (상단 하이라이트)
-        draw.rectangle([bar_left, bar_y, bar_right, bar_y + 2], fill=(160, 160, 170, 255))
-        # 막대 하단 그림자
-        draw.rectangle([bar_left, bar_y + bar_height - 2, bar_right, bar_y + bar_height], fill=(80, 80, 90, 255))
+        # 검은색/매우 어두운 텍스트 색상 처리
+        try:
+            if sum(text_rgb) < 30:
+                text_rgb = (35, 35, 35)
+                print(f"[DEBUG] 검은색 텍스트 감지 → {text_rgb}로 조정")
+        except Exception:
+            pass
         
-        # RGB로 변환 (투명 부분은 검은색으로)
-        bg = Image.new('RGB', (width, height), (0, 0, 0))
-        bg.paste(signboard, (0, 0), signboard)
-        signboard = bg
+        # 텍스트 렌더링 문자열 준비
+        if text_direction == "vertical":
+            text_to_render = '\n'.join(list(text))
+        else:
+            text_to_render = text
         
-        # signboard_np 업데이트 (프레임바가 그려진 후)
-        signboard_np = cv2.cvtColor(np.array(signboard), cv2.COLOR_RGB2BGR)
+        # 실제 텍스트 레이어 먼저 추출 (안티앨리어싱 포함된 alpha 채널 사용)
+        text_layer_rgba = extract_text_layer(text_to_render, font, text_rgb, (width, height), position)
+        text_layer_bgr = cv2.cvtColor(text_layer_rgba, cv2.COLOR_RGBA2BGR)
+        
+        # 실제 alpha 채널로 프레임바 마스킹 (안티앨리어싱 정보 포함)
+        text_alpha_3ch = np.repeat(
+            text_layer_rgba[:, :, 3:4].astype(np.float32) / 255.0,
+            3,
+            axis=2
+        )  # (h, w, 3) 형태, 0-1 범위
+        
+        # 프레임바를 별도 레이어로 생성 (numpy 배열로)
+        frame_layer = np.zeros((height, width, 3), dtype=np.uint8)
+        
+        # 알루미늄 막대 (은색, 약간 어두운 회색) - BGR 형식
+        bar_color_bgr = (130, 120, 120)  # RGB(120, 120, 130) -> BGR(130, 120, 120)
+        frame_layer[bar_y:bar_y + bar_height, bar_left:bar_right] = bar_color_bgr
+        
+        # 막대 입체감 (상단 하이라이트) - BGR 형식
+        highlight_color_bgr = (170, 160, 160)  # RGB(160, 160, 170) -> BGR(170, 160, 160)
+        frame_layer[bar_y:bar_y + 2, bar_left:bar_right] = highlight_color_bgr
+        
+        # 막대 하단 그림자 - BGR 형식
+        shadow_color_bgr = (90, 80, 80)  # RGB(80, 80, 90) -> BGR(90, 80, 80)
+        frame_layer[bar_y + bar_height - 2:bar_y + bar_height, bar_left:bar_right] = shadow_color_bgr
+        
+        # 텍스트 영역을 프레임바에서 부드럽게 제외 (실제 alpha 값 사용)
+        # alpha=255(1.0) → 프레임바 0% (완전 제거)
+        # alpha=127(0.5) → 프레임바 50% (반만 제거)
+        # alpha=0(0.0) → 프레임바 100% (유지)
+        frame_layer = (frame_layer.astype(np.float32) * (1 - text_alpha_3ch)).astype(np.uint8)
+        
+        # 프레임바 레이어를 signboard_np에 합성
+        signboard_np = cv2.add(signboard_np, frame_layer)
     
     # 간판 종류에 따라 렌더링
-    text_rgb = hex_to_rgb(text_color) if text_color.startswith('#') else (255, 255, 255)
+    # 프레임바가 아닌 경우에만 text_rgb, text_to_render 계산
+    if not is_frame_bar:
+        text_rgb = hex_to_rgb(text_color) if text_color.startswith('#') else (255, 255, 255)
 
-    # 검은색/매우 어두운 텍스트 색상 처리:
-    # composite_signboard의 transparency_mask(밝기 30 미만 투명 처리)에 걸려서
-    # 글자가 사라지는 문제를 막기 위해, 아주 약간 밝은 회색으로 올려줌.
-    try:
-        if sum(text_rgb) < 30:  # RGB 합이 30 미만이면 거의 검정으로 간주
-            text_rgb = (35, 35, 35)  # 투명 threshold(30)보다 살짝 높은 아주 어두운 회색
-            print(f"[DEBUG] 검은색 텍스트 감지 → {text_rgb}로 조정")
-    except Exception:
-        pass
-    
-    if text_direction == "vertical":
-        text_to_render = '\n'.join(list(text))
-    else:
-        text_to_render = text
+        # 검은색/매우 어두운 텍스트 색상 처리:
+        # composite_signboard의 transparency_mask(밝기 30 미만 투명 처리)에 걸려서
+        # 글자가 사라지는 문제를 막기 위해, 아주 약간 밝은 회색으로 올려줌.
+        try:
+            if sum(text_rgb) < 30:  # RGB 합이 30 미만이면 거의 검정으로 간주
+                text_rgb = (35, 35, 35)  # 투명 threshold(30)보다 살짝 높은 아주 어두운 회색
+                print(f"[DEBUG] 검은색 텍스트 감지 → {text_rgb}로 조정")
+        except Exception:
+            pass
+        
+        if text_direction == "vertical":
+            text_to_render = '\n'.join(list(text))
+        else:
+            text_to_render = text
     
     if sign_type == "전광채널":
         # 전광채널 주간: 후광채널과 동일하게 "앞면 + 3D"만 사용 (glow 없음)
-        text_layer_rgba = extract_text_layer(text_to_render, font, text_rgb, (width, height), position)
-        text_layer_bgr = cv2.cvtColor(text_layer_rgba, cv2.COLOR_RGBA2BGR)
+        # 프레임바인 경우 이미 추출했으므로 재사용, 아닌 경우 새로 추출
+        if not is_frame_bar:
+            text_layer_rgba = extract_text_layer(text_to_render, font, text_rgb, (width, height), position)
+            text_layer_bgr = cv2.cvtColor(text_layer_rgba, cv2.COLOR_RGBA2BGR)
 
-        # 후광채널과 동일: 배경 + 텍스트 합성만
-        day_result = cv2.add(signboard_np, text_layer_bgr)
+        # 텍스트 우선 합성: alpha 기반 덮어쓰기 (프레임바와 겹칠 때 색상 간섭 방지)
+        # alpha 채널 추출 및 3채널로 확장
+        # 프레임바인 경우 이미 계산했으므로 재사용, 아닌 경우 새로 계산
+        if not is_frame_bar:
+            text_alpha = text_layer_rgba[:, :, 3:4].astype(np.float32) / 255.0  # (h, w, 1) 형태, 0-1 범위
+            text_alpha_3ch = np.repeat(text_alpha, 3, axis=2)  # (h, w, 3) 형태로 확장
+        # 프레임바인 경우: text_alpha_3ch는 이미 프레임바 처리 블록에서 계산됨
+        
+        # alpha 블렌딩: 텍스트가 있는 부분은 텍스트 색상으로, 없는 부분은 배경(프레임바) 유지
+        day_result = (signboard_np.astype(np.float32) * (1 - text_alpha_3ch) + text_layer_bgr.astype(np.float32) * text_alpha_3ch).astype(np.uint8)
 
         # 3D 입체감 (후광과 동일 depth=6)
         day_result = add_3d_depth(day_result, depth=6)
@@ -1120,7 +1173,7 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
         text_layer_bgr = cv2.cvtColor(text_layer_rgba, cv2.COLOR_RGBA2BGR)
 
         # 2) 텍스트 옆면 (원본보다 50% 더 어두운 색상, 오른쪽 아래로 대각선 offset)
-        side_color = tuple(int(c * 0.5) for c in text_rgb)
+        side_color = tuple(int(c * 0.5) for c in text_rgb)  # 0.5x (원래대로)
         side_offset_x = 2
         side_offset_y = 1
         side_position = (position[0] + side_offset_x, position[1] + side_offset_y)
@@ -1140,20 +1193,27 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
         shadow_alpha_3ch = np.stack([shadow_alpha, shadow_alpha, shadow_alpha], axis=2)
         result_f = result_f * (1 - shadow_alpha_3ch) + shadow_layer_bgr.astype(np.float32) * shadow_alpha_3ch
 
-        # 옆면, 앞면 합성
-        result_f = cv2.add(result_f.astype(np.uint8), side_layer_bgr)
-        result_f = cv2.add(result_f, text_layer_bgr)
+        # 옆면, 앞면 합성 (alpha blending 사용 - 색상 간섭 방지)
+        # 옆면 alpha blending
+        side_alpha = side_layer_rgba[:, :, 3:4].astype(np.float32) / 255.0
+        side_alpha_3ch = np.repeat(side_alpha, 3, axis=2)
+        result_f = result_f * (1 - side_alpha_3ch) + side_layer_bgr.astype(np.float32) * side_alpha_3ch
+        
+        # 앞면 alpha blending
+        text_alpha = text_layer_rgba[:, :, 3:4].astype(np.float32) / 255.0
+        text_alpha_3ch = np.repeat(text_alpha, 3, axis=2)
+        result_f = result_f * (1 - text_alpha_3ch) + text_layer_bgr.astype(np.float32) * text_alpha_3ch
 
         # 살짝 하이라이트 추가 (기존 스카시 느낌 유지)
         highlight_pos = (position[0] - 1, position[1] - 1)
         highlight_rgb = tuple(min(255, c + 30) for c in text_rgb)
         highlight_layer_rgba = extract_text_layer(text_to_render, font, highlight_rgb, (width, height), highlight_pos)
         highlight_layer_bgr = cv2.cvtColor(highlight_layer_rgba, cv2.COLOR_RGBA2BGR)
-        result_f = cv2.addWeighted(result_f, 0.95, highlight_layer_bgr, 0.15, 0)
+        result_f = cv2.addWeighted(result_f, 0.95, highlight_layer_bgr.astype(np.float32), 0.15, 0)
 
         # 금속/아크릴 질감 노이즈 유지
-        texture = np.random.randint(-3, 3, result_f.shape, dtype=np.int16)
-        result_f = np.clip(result_f.astype(np.int16) + texture, 0, 255).astype(np.uint8)
+        texture = np.random.randint(-3, 3, result_f.shape, dtype=np.int16).astype(np.float32)
+        result_f = np.clip(result_f + texture, 0, 255).astype(np.uint8)
 
         result = add_3d_depth(result_f, depth=8)
         return result, None
@@ -1184,6 +1244,7 @@ def render_signboard(text: str, logo_path: str, logo_type: str, installation_typ
     """간판 이미지 생성 - 설치 방식 + 간판 종류
     Returns: (day_image, text_layer) - text_layer는 전광채널만 분리, 나머지는 None
     """
+    print(f"[DEBUG] render_signboard called with sign_type: {sign_type}")
     # 로고 이미지 로드
     logo_img = None
     if logo_path and logo_path.strip():
@@ -1205,8 +1266,10 @@ def render_signboard(text: str, logo_path: str, logo_type: str, installation_typ
     elif sign_type == "전후광채널":
         result, text_layer = render_combined_signboard(installation_type, "전후광채널", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height)
         return result, text_layer
-    elif sign_type == "스카시":
-        result, _ = render_combined_signboard(installation_type, "스카시", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height)
+    elif sign_type.startswith("스카시"):
+        # 스카시_금속, 스카시_아크릴 등 모든 스카시 변형 지원
+        print(f"[DEBUG] render_signboard: 스카시 감지, sign_type={sign_type}, render_combined_signboard 호출")
+        result, _ = render_combined_signboard(installation_type, sign_type, text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height)
         return result, None
     elif sign_type == "플렉스":
         result, _ = render_combined_signboard(installation_type, "플렉스", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height)
@@ -1546,7 +1609,7 @@ def composite_signboard(
         elif sign_type == "플렉스":
             glow_intensity = 2.2  # 전체 발광
             night_result = night_base * (1 - combined_mask) + warped_sign.astype(np.float32) * combined_mask * glow_intensity
-        elif sign_type == "스카시":
+        elif sign_type == "스카시" or sign_type.startswith("스카시_"):
             # 비조명: 야간에는 전체를 어둡게(배경과 동일 수준)
             glow_intensity = 0.3
             night_result = night_base * (1 - combined_mask) + warped_sign.astype(np.float32) * combined_mask * glow_intensity
@@ -2192,4 +2255,4 @@ async def root():
     return {"message": "Signboard Simulation API"}
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
