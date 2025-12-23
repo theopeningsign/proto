@@ -37,3 +37,17 @@ yarn-error.log*
 .env.test.local
 .env.production.local
 
+# Phase 2 학습 데이터 (이미지 파일은 제외)
+signboard-backend/phase2_data/real_photos/
+signboard-backend/phase2_data/phase1_output/
+signboard-backend/phase2_data/paired_data/
+
+# 이미지 파일 (일반)
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.bmp
+*.tiff
+*.webp
+

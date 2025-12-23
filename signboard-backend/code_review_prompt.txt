@@ -1,0 +1,1181 @@
+다음은 간판 사진 라벨링 도구와 Phase 2 학습용 데이터 pair 생성 스크립트입니다. 
+코드를 검토하고 잠재적인 버그, 개선점, 코드 품질 이슈를 찾아주세요.
+
+## 프로젝트 컨텍스트
+- **label_tool_gui.py**: GUI 기반 간판 사진 라벨링 도구
+  - 실제 간판 사진을 보고 타입(channel/scasi/flex)과 시간대(day/night)를 분류
+  - 파일을 적절한 폴더로 이동하고 labels.json에 메타데이터 저장
+  
+- **generate_pairs.py**: Phase 2 학습용 데이터 생성
+  - labels.json과 실제 사진을 기반으로 학습용 pair 생성
+  - 실제 사진에서 색상을 추출하여 동일한 옵션으로 Phase 1 간판 이미지 생성
+  - train/test 분리 후 저장
+
+## 코드 검토 요청사항
+1. **버그 및 논리 오류**: 코드 실행 시 발생할 수 있는 버그
+2. **에러 핸들링**: 예외 상황 처리의 완전성
+3. **경로 처리**: 파일/폴더 경로 처리의 안정성
+4. **데이터 일관성**: labels.json 구조와 데이터 흐름의 일관성
+5. **코드 품질**: 가독성, 유지보수성, 성능 이슈
+6. **Edge cases**: 예상치 못한 입력이나 상황 처리
+
+---
+
+## label_tool_gui.py
+
+"""
+간판 사진 라벨링 도구 (GUI 버전)
+
+사용법:
+    python label_tool_gui.py --input real_photos/unlabeled/
+    python label_tool_gui.py --input real_photos/unlabeled/ --labels labels.json
+
+기능:
+    - GUI로 사진을 보여주고 버튼/키보드로 분류
+    - 자동으로 해당 폴더로 이동
+    - labels.json에 메타데이터 저장
+"""
+
+import os
+import json
+import shutil
+import argparse
+from pathlib import Path
+from datetime import datetime
+from PIL import Image, ImageTk
+import tkinter as tk
+from tkinter import ttk, messagebox, filedialog
+import cv2
+import numpy as np
+
+# 간판 타입 매핑
+SIGN_TYPES = {
+    '1': 'channel',
+    '2': 'scasi',
+    '3': 'flex'
+}
+
+# 시간대 매핑
+TIME_TYPES = {
+    'd': 'day',
+    'n': 'night'
+}
+
+# 타입 한글명
+SIGN_TYPE_NAMES = {
+    'channel': '채널',
+    'scasi': '스카시',
+    'flex': '플렉스'
+}
+
+TIME_TYPE_NAMES = {
+    'day': '주간',
+    'night': '야간'
+}
+
+
+class LabelingToolGUI:
+    def __init__(self, input_dir, labels_file=None, output_base=None):
+        """
+        라벨링 도구 GUI 초기화
+        
+        Args:
+            input_dir: 라벨링할 사진이 있는 폴더
+            labels_file: labels.json 파일 경로 (없으면 자동 생성)
+            output_base: 출력 기본 폴더 (없으면 input_dir의 상위 폴더)
+        """
+        self.input_dir = Path(input_dir)
+        self.output_base = output_base or self.input_dir.parent
+        
+        # labels.json 경로
+        if labels_file:
+            self.labels_file = Path(labels_file)
+        else:
+            self.labels_file = self.output_base / "labels.json"
+        
+        # labels.json 로드
+        self.labels = self.load_labels()
+        
+        # 되돌리기 히스토리
+        self.undo_history = []
+        
+        # 이미지 파일 목록
+        self.image_files = self.get_image_files()
+        self.current_index = 0
+        
+        # 통계
+        self.stats = {
+            'total': len(self.image_files),
+            'labeled': 0,
+            'skipped': 0
+        }
+        
+        # 선택 상태
+        self.selected_sign_type = None
+        self.selected_time_type = None
+        
+        # GUI 초기화
+        self.setup_gui()
+        
+        # 첫 이미지 로드
+        if self.image_files:
+            self.load_current_image()
+        else:
+            messagebox.showwarning("경고", f"{self.input_dir}에 이미지 파일이 없습니다.")
+            self.root.quit()
+    
+    def load_labels(self):
+        """labels.json 로드"""
+        if self.labels_file.exists():
+            with open(self.labels_file, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        else:
+            # 기본 구조 생성
+            return {
+                "channel": {"day": [], "night": []},
+                "scasi": {"day": [], "night": []},
+                "flex": {"day": [], "night": []}
+            }
+    
+    def save_labels(self):
+        """labels.json 저장"""
+        self.labels_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.labels_file, 'w', encoding='utf-8') as f:
+            json.dump(self.labels, f, ensure_ascii=False, indent=2)
+    
+    def get_image_files(self):
+        """이미지 파일 목록 가져오기 (중복 제거)"""
+        extensions = ['.jpg', '.jpeg', '.png', '.JPG', '.JPEG', '.PNG']
+        files_set = set()  # 중복 제거를 위해 set 사용
+        
+        for ext in extensions:
+            found_files = list(self.input_dir.glob(f'*{ext}'))
+            # 파일이 실제로 존재하는지 확인하고 추가
+            for file_path in found_files:
+                if file_path.exists() and file_path.is_file():
+                    files_set.add(file_path)
+        
+        # 정렬된 리스트로 반환
+        return sorted(list(files_set))
+    
+    def setup_gui(self):
+        """GUI 설정"""
+        self.root = tk.Tk()
+        self.root.title("간판 사진 라벨링 도구")
+        self.root.geometry("1200x800")
+        self.root.configure(bg='#1e1e1e')
+        
+        # 키보드 단축키 바인딩
+        self.root.bind('<Key-1>', lambda e: self.select_sign_type('1'))
+        self.root.bind('<Key-2>', lambda e: self.select_sign_type('2'))
+        self.root.bind('<Key-3>', lambda e: self.select_sign_type('3'))
+        self.root.bind('<Key-d>', lambda e: self.select_time_type('d'))
+        self.root.bind('<Key-D>', lambda e: self.select_time_type('d'))
+        self.root.bind('<Key-n>', lambda e: self.select_time_type('n'))
+        self.root.bind('<Key-N>', lambda e: self.select_time_type('n'))
+        self.root.bind('<Key-s>', lambda e: self.skip_image())
+        self.root.bind('<Key-S>', lambda e: self.skip_image())
+        self.root.bind('<Key-z>', lambda e: self.undo_last())
+        self.root.bind('<Key-Z>', lambda e: self.undo_last())
+        self.root.bind('<Key-q>', lambda e: self.quit_app())
+        self.root.bind('<Key-Q>', lambda e: self.quit_app())
+        self.root.focus_set()
+        
+        # 메인 프레임
+        main_frame = ttk.Frame(self.root, padding="10")
+        main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        self.root.columnconfigure(0, weight=1)
+        self.root.rowconfigure(0, weight=1)
+        main_frame.columnconfigure(0, weight=1)
+        main_frame.rowconfigure(1, weight=1)
+        
+        # 상단: 진행상황 및 통계
+        top_frame = ttk.Frame(main_frame)
+        top_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
+        top_frame.columnconfigure(1, weight=1)
+        
+        # 진행상황
+        progress = (self.current_index / self.stats['total'] * 100) if self.stats['total'] > 0 else 0
+        self.progress_label = ttk.Label(
+            top_frame,
+            text=f"진행: {self.current_index + 1}/{self.stats['total']} ({progress:.1f}%)",
+            font=('맑은 고딕', 12, 'bold')
+        )
+        self.progress_label.grid(row=0, column=0, sticky=tk.W, padx=(0, 20))
+        
+        # 통계
+        self.stats_label = ttk.Label(
+            top_frame,
+            text=f"라벨링: {self.stats['labeled']} | 건너뛰기: {self.stats['skipped']}",
+            font=('맑은 고딕', 10)
+        )
+        self.stats_label.grid(row=0, column=1, sticky=tk.E)
+        
+        # 중앙: 이미지 및 컨트롤
+        center_frame = ttk.Frame(main_frame)
+        center_frame.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        center_frame.columnconfigure(0, weight=2)
+        center_frame.columnconfigure(1, weight=1)
+        
+        # 왼쪽: 이미지 표시
+        image_frame = ttk.LabelFrame(center_frame, text="이미지", padding="10")
+        image_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(0, 10))
+        image_frame.columnconfigure(0, weight=1)
+        image_frame.rowconfigure(0, weight=1)
+        
+        self.image_label = ttk.Label(image_frame, text="이미지 로딩 중...")
+        self.image_label.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        
+        # 파일 정보
+        self.file_info_label = ttk.Label(
+            image_frame,
+            text="",
+            font=('맑은 고딕', 9),
+            foreground='gray'
+        )
+        self.file_info_label.grid(row=1, column=0, pady=(10, 0))
+        
+        # 오른쪽: 컨트롤 패널
+        control_frame = ttk.LabelFrame(center_frame, text="분류", padding="10")
+        control_frame.grid(row=0, column=1, sticky=(tk.W, tk.E, tk.N, tk.S))
+        
+        # 간판 타입 선택
+        type_label = ttk.Label(control_frame, text="간판 타입:", font=('맑은 고딕', 11, 'bold'))
+        type_label.grid(row=0, column=0, columnspan=3, sticky=tk.W, pady=(0, 10))
+        
+        self.sign_type_buttons = {}
+        for i, (key, sign_type) in enumerate(SIGN_TYPES.items()):
+            btn = tk.Button(
+                control_frame,
+                text=f"[{key}] {SIGN_TYPE_NAMES[sign_type]}",
+                font=('맑은 고딕', 12),
+                bg='#2d2d2d',
+                fg='white',
+                activebackground='#3d3d3d',
+                activeforeground='white',
+                relief=tk.RAISED,
+                bd=2,
+                padx=20,
+                pady=10,
+                command=lambda k=key: self.select_sign_type(k)
+            )
+            btn.grid(row=1, column=i, padx=5, pady=5, sticky=(tk.W, tk.E))
+            self.sign_type_buttons[key] = btn
+        
+        # 선택된 타입 표시
+        self.selected_type_label = ttk.Label(
+            control_frame,
+            text="",
+            font=('맑은 고딕', 10),
+            foreground='#4CAF50'
+        )
+        self.selected_type_label.grid(row=2, column=0, columnspan=3, pady=(5, 20))
+        
+        # 시간대 선택
+        time_label = ttk.Label(control_frame, text="시간대:", font=('맑은 고딕', 11, 'bold'))
+        time_label.grid(row=3, column=0, columnspan=3, sticky=tk.W, pady=(0, 10))
+        
+        self.time_type_buttons = {}
+        for i, (key, time_type) in enumerate(TIME_TYPES.items()):
+            btn = tk.Button(
+                control_frame,
+                text=f"[{key.upper()}] {TIME_TYPE_NAMES[time_type]}",
+                font=('맑은 고딕', 12),
+                bg='#2d2d2d',
+                fg='white',
+                activebackground='#3d3d3d',
+                activeforeground='white',
+                relief=tk.RAISED,
+                bd=2,
+                padx=30,
+                pady=10,
+                command=lambda k=key: self.select_time_type(k),
+                state=tk.DISABLED
+            )
+            btn.grid(row=4, column=i, padx=5, pady=5, sticky=(tk.W, tk.E))
+            self.time_type_buttons[key] = btn
+        
+        # 확인 버튼 (타입과 시간 모두 선택 후)
+        self.confirm_button = tk.Button(
+            control_frame,
+            text="✓ 확인 및 저장",
+            font=('맑은 고딕', 12, 'bold'),
+            bg='#4CAF50',
+            fg='white',
+            activebackground='#45a049',
+            activeforeground='white',
+            relief=tk.RAISED,
+            bd=2,
+            padx=20,
+            pady=15,
+            command=self.confirm_labeling,
+            state=tk.DISABLED
+        )
+        self.confirm_button.grid(row=5, column=0, columnspan=3, pady=(20, 10), sticky=(tk.W, tk.E))
+        
+        # 기타 버튼
+        other_frame = ttk.Frame(control_frame)
+        other_frame.grid(row=6, column=0, columnspan=3, pady=(10, 0), sticky=(tk.W, tk.E))
+        
+        skip_btn = tk.Button(
+            other_frame,
+            text="[S] 건너뛰기",
+            font=('맑은 고딕', 10),
+            bg='#ff9800',
+            fg='white',
+            command=self.skip_image
+        )
+        skip_btn.grid(row=0, column=0, padx=5, sticky=(tk.W, tk.E))
+        
+        undo_btn = tk.Button(
+            other_frame,
+            text="[Z] 되돌리기",
+            font=('맑은 고딕', 10),
+            bg='#f44336',
+            fg='white',
+            command=self.undo_last
+        )
+        undo_btn.grid(row=0, column=1, padx=5, sticky=(tk.W, tk.E))
+        
+        other_frame.columnconfigure(0, weight=1)
+        other_frame.columnconfigure(1, weight=1)
+        
+        # 종료 버튼
+        quit_btn = tk.Button(
+            control_frame,
+            text="[Q] 종료 및 저장",
+            font=('맑은 고딕', 10),
+            bg='#616161',
+            fg='white',
+            command=self.quit_app
+        )
+        quit_btn.grid(row=7, column=0, columnspan=3, pady=(10, 0), sticky=(tk.W, tk.E))
+        
+        # 하단: 키보드 단축키 안내
+        help_frame = ttk.Frame(main_frame)
+        help_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=(10, 0))
+        
+        help_text = "키보드 단축키: [1] 채널 | [2] 스카시 | [3] 플렉스 | [D] 주간 | [N] 야간 | [S] 건너뛰기 | [Z] 되돌리기 | [Q] 종료"
+        help_label = ttk.Label(
+            help_frame,
+            text=help_text,
+            font=('맑은 고딕', 9),
+            foreground='gray'
+        )
+        help_label.pack()
+    
+    def load_current_image(self):
+        """현재 이미지 로드 및 표시"""
+        # 파일 목록 다시 읽기 (파일이 이동되었을 수 있음)
+        old_count = len(self.image_files)
+        self.image_files = self.get_image_files()
+        new_count = len(self.image_files)
+        
+        # 파일 수가 변경되었으면 인덱스 조정
+        if new_count < old_count and self.current_index >= new_count:
+            self.current_index = max(0, new_count - 1)
+        
+        if not self.image_files:
+            messagebox.showinfo("완료", "처리할 이미지가 없습니다!")
+            self.quit_app()
+            return
+        
+        if self.current_index >= len(self.image_files):
+            messagebox.showinfo("완료", "모든 이미지를 처리했습니다!")
+            self.quit_app()
+            return
+        
+        image_path = self.image_files[self.current_index]
+        
+        # 파일이 존재하는지 확인
+        if not image_path.exists():
+            # 파일 목록에서 제거하고 다음으로
+            if image_path in self.image_files:
+                self.image_files.remove(image_path)
+            messagebox.showwarning("경고", f"파일을 찾을 수 없습니다: {image_path}\n다음 이미지로 넘어갑니다.")
+            self.next_image()
+            return
+        
+        try:
+            # 이미지 로드 및 리사이즈
+            img = Image.open(image_path)
+            width, height = img.size
+            file_size = os.path.getsize(image_path) / 1024  # KB
+            
+            # 표시 영역에 맞게 리사이즈 (최대 800x600)
+            max_width = 800
+            max_height = 600
+            if width > max_width or height > max_height:
+                scale = min(max_width / width, max_height / height)
+                new_width = int(width * scale)
+                new_height = int(height * scale)
+                img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            
+            # PhotoImage로 변환
+            photo = ImageTk.PhotoImage(img)
+            self.image_label.configure(image=photo, text="")
+            self.image_label.image = photo  # 참조 유지
+            
+            # 파일 정보 업데이트
+            self.file_info_label.configure(
+                text=f"파일: {image_path.name} | 크기: {width}x{height}px | 용량: {file_size:.1f} KB"
+            )
+            
+            # 선택 상태 초기화
+            self.selected_sign_type = None
+            self.selected_time_type = None
+            self.update_button_states()
+            
+            # 진행상황 업데이트
+            self.update_progress()
+            
+        except Exception as e:
+            messagebox.showerror("오류", f"이미지 로드 실패: {e}\n파일: {image_path}")
+            # 파일이 없으면 다음으로, 있으면 재시도
+            if not image_path.exists():
+                self.next_image()
+            else:
+                # 파일은 있지만 로드 실패 - 사용자에게 선택권 제공
+                retry = messagebox.askyesno("재시도", "이미지 로드에 실패했습니다. 재시도하시겠습니까?")
+                if not retry:
+                    self.next_image()
+    
+    def update_button_states(self):
+        """버튼 상태 업데이트"""
+        # 간판 타입 버튼 색상
+        for key, btn in self.sign_type_buttons.items():
+            if self.selected_sign_type == key:
+                btn.configure(bg='#4CAF50', fg='white')
+            else:
+                btn.configure(bg='#2d2d2d', fg='white')
+        
+        # 선택된 타입 표시
+        if self.selected_sign_type:
+            sign_type = SIGN_TYPES[self.selected_sign_type]
+            self.selected_type_label.configure(
+                text=f"선택: {SIGN_TYPE_NAMES[sign_type]} 간판"
+            )
+        else:
+            self.selected_type_label.configure(text="")
+        
+        # 시간대 버튼 활성화/비활성화
+        if self.selected_sign_type:
+            for btn in self.time_type_buttons.values():
+                btn.configure(state=tk.NORMAL)
+        else:
+            for btn in self.time_type_buttons.values():
+                btn.configure(state=tk.DISABLED)
+        
+        # 시간대 버튼 색상
+        for key, btn in self.time_type_buttons.items():
+            if self.selected_time_type == key:
+                btn.configure(bg='#2196F3', fg='white')
+            else:
+                btn.configure(bg='#2d2d2d', fg='white')
+        
+        # 확인 버튼 활성화/비활성화
+        if self.selected_sign_type and self.selected_time_type:
+            self.confirm_button.configure(state=tk.NORMAL, bg='#4CAF50')
+        else:
+            self.confirm_button.configure(state=tk.DISABLED, bg='#616161')
+    
+    def select_sign_type(self, key):
+        """간판 타입 선택"""
+        self.selected_sign_type = key
+        self.selected_time_type = None  # 시간대 초기화
+        self.update_button_states()
+    
+    def select_time_type(self, key):
+        """시간대 선택"""
+        if not self.selected_sign_type:
+            return
+        self.selected_time_type = key
+        self.update_button_states()
+    
+    def confirm_labeling(self):
+        """라벨링 확인 및 저장"""
+        if not self.selected_sign_type or not self.selected_time_type:
+            return
+        
+        sign_type = SIGN_TYPES[self.selected_sign_type]
+        time_type = TIME_TYPES[self.selected_time_type]
+        image_path = self.image_files[self.current_index]
+        
+        try:
+            # 파일 이동
+            dest_file = self.move_file(image_path, sign_type, time_type)
+            
+            # labels.json에 추가
+            self.add_to_labels(dest_file, sign_type, time_type, image_path)
+            
+            # 되돌리기 히스토리에 추가
+            self.undo_history.append({
+                'source_file': image_path,
+                'dest_file': dest_file,
+                'sign_type': sign_type,
+                'time_type': time_type
+            })
+            
+            # 통계 업데이트
+            self.stats['labeled'] += 1
+            self.update_progress()
+            
+            # 다음 이미지
+            self.next_image()
+            
+        except Exception as e:
+            messagebox.showerror("오류", f"파일 이동 실패: {e}")
+    
+    def skip_image(self):
+        """이미지 건너뛰기"""
+        self.stats['skipped'] += 1
+        self.update_progress()
+        self.next_image()
+    
+    def undo_last(self):
+        """마지막 분류 되돌리기"""
+        if not self.undo_history:
+            messagebox.showinfo("알림", "되돌릴 항목이 없습니다.")
+            return
+        
+        last_action = self.undo_history.pop()
+        
+        try:
+            # 파일 되돌리기
+            if last_action['dest_file'].exists():
+                shutil.move(str(last_action['dest_file']), str(last_action['source_file']))
+            
+            # labels.json에서 제거
+            sign_type = last_action['sign_type']
+            time_type = last_action['time_type']
+            labels_list = self.labels[sign_type][time_type]
+            
+            if labels_list:
+                labels_list.pop()
+            
+            # 통계 업데이트
+            self.stats['labeled'] -= 1
+            self.current_index -= 1
+            self.update_progress()
+            
+            # 현재 이미지 다시 로드
+            self.load_current_image()
+            
+            messagebox.showinfo("완료", f"되돌림 완료: {last_action['source_file'].name}")
+            
+        except Exception as e:
+            messagebox.showerror("오류", f"되돌리기 실패: {e}")
+    
+    def next_image(self):
+        """다음 이미지로"""
+        self.current_index += 1
+        # 파일 목록 다시 읽기 (이동된 파일 제외)
+        self.image_files = self.get_image_files()
+        
+        # 현재 인덱스가 범위를 벗어났으면 조정
+        if self.current_index >= len(self.image_files) and len(self.image_files) > 0:
+            self.current_index = len(self.image_files) - 1
+        
+        if self.current_index < len(self.image_files) and len(self.image_files) > 0:
+            self.load_current_image()
+        else:
+            messagebox.showinfo("완료", "모든 이미지를 처리했습니다!")
+            self.quit_app()
+    
+    def update_progress(self):
+        """진행상황 업데이트"""
+        # 현재 남은 파일 수 기준으로 진행률 계산
+        remaining = len(self.image_files)
+        total_processed = self.stats['labeled'] + self.stats['skipped']
+        original_total = self.stats['total']
+        
+        if original_total > 0:
+            progress = (total_processed / original_total * 100)
+            self.progress_label.configure(
+                text=f"진행: {total_processed}/{original_total} ({progress:.1f}%) | 남은 파일: {remaining}"
+            )
+        else:
+            self.progress_label.configure(
+                text=f"진행: {self.current_index + 1}/{remaining} | 남은 파일: {remaining}"
+            )
+        
+        self.stats_label.configure(
+            text=f"라벨링: {self.stats['labeled']} | 건너뛰기: {self.stats['skipped']}"
+        )
+    
+    def move_file(self, source, sign_type, time_type):
+        """파일을 해당 폴더로 이동"""
+        dest_dir = self.output_base / "real_photos" / sign_type / time_type
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        
+        base_name = source.stem
+        ext = source.suffix
+        dest_file = dest_dir / f"{sign_type}_{base_name}_{time_type}{ext}"
+        
+        counter = 1
+        while dest_file.exists():
+            dest_file = dest_dir / f"{sign_type}_{base_name}_{time_type}_{counter}{ext}"
+            counter += 1
+        
+        shutil.move(str(source), str(dest_file))
+        return dest_file
+    
+    def add_to_labels(self, image_path, sign_type, time_type, original_path):
+        """labels.json에 추가"""
+        file_id = f"{sign_type}_{image_path.stem}_{time_type}"
+        
+        entry = {
+            "id": file_id,
+            "real_photo": str(image_path.relative_to(self.output_base)),
+            "sign_type": sign_type,
+            "time": time_type,
+            "date_labeled": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "original_filename": original_path.name
+        }
+        
+        self.labels[sign_type][time_type].append(entry)
+    
+    def quit_app(self):
+        """종료 및 저장"""
+        self.save_labels()
+        
+        # 최종 통계 표시
+        stats_msg = f"""라벨링 완료!
+
+총 파일: {self.stats['total']}
+라벨링 완료: {self.stats['labeled']}
+건너뛰기: {self.stats['skipped']}
+
+labels.json 저장: {self.labels_file}
+"""
+        messagebox.showinfo("완료", stats_msg)
+        self.root.quit()
+    
+    def run(self):
+        """GUI 실행"""
+        self.root.mainloop()
+
+
+def main():
+    """메인 함수"""
+    parser = argparse.ArgumentParser(description='간판 사진 라벨링 도구 (GUI)')
+    parser.add_argument(
+        '--input',
+        type=str,
+        required=False,
+        help='라벨링할 사진이 있는 폴더 (없으면 GUI에서 선택)'
+    )
+    parser.add_argument(
+        '--labels',
+        type=str,
+        default=None,
+        help='labels.json 파일 경로 (기본: input 폴더의 상위/labels.json)'
+    )
+    parser.add_argument(
+        '--output',
+        type=str,
+        default=None,
+        help='출력 기본 폴더 (기본: input 폴더의 상위)'
+    )
+    
+    args = parser.parse_args()
+    
+    # input이 없으면 GUI에서 폴더 선택
+    if not args.input:
+        # 임시 루트로 폴더 선택 다이얼로그 띄우기
+        root = tk.Tk()
+        root.withdraw()  # 메인 창 숨기기
+        
+        # 기본 경로 설정 (phase2_data/real_photos/unlabeled/)
+        default_path = Path(__file__).parent / "phase2_data" / "real_photos" / "unlabeled"
+        if not default_path.exists():
+            default_path = Path(__file__).parent
+        
+        input_dir = filedialog.askdirectory(
+            title="라벨링할 사진이 있는 폴더를 선택하세요",
+            initialdir=str(default_path)
+        )
+        
+        root.destroy()
+        
+        if not input_dir:
+            print("폴더가 선택되지 않았습니다.")
+            return
+        
+        args.input = input_dir
+    
+    # 도구 실행
+    tool = LabelingToolGUI(
+        input_dir=args.input,
+        labels_file=args.labels,
+        output_base=args.output
+    )
+    tool.run()
+
+
+if __name__ == "__main__":
+    main()
+
+---
+
+## generate_pairs.py
+
+"""
+Phase 2 학습용 Input/Target pair 생성 스크립트.
+
+실제 간판 사진(real_photos)과 labels.json을 기반으로:
+- 실제 사진에서 배경색/텍스트색을 추출하고
+- 동일 옵션으로 Phase 1 간판 이미지를 생성한 뒤
+- 학습용 pair (Phase1 input / 실제 target)를 저장한다.
+
+사용 예시:
+
+    python generate_pairs.py \
+        --real phase2_data/real_photos \
+        --output phase2_data/paired_data \
+        --labels phase2_data/labels.json \
+        --split 0.8
+
+출력 구조:
+
+phase2_data/paired_data/
+  ├── train/
+  │   ├── input/   (Phase 1 생성 PNG)
+  │   └── target/  (실제 사진 JPG)
+  ├── test/
+  │   ├── input/
+  │   └── target/
+  └── pairs_metadata.json
+"""
+
+import argparse
+import json
+import random
+from pathlib import Path
+from typing import Dict, Tuple, List
+
+import cv2
+import numpy as np
+from sklearn.cluster import KMeans
+
+from main import render_signboard
+
+
+# 라벨링에서 사용한 sign_type 키 → Phase 1 sign_type 문자열 매핑
+SIGN_TYPE_MAP = {
+    "channel": "전광채널",
+    "scasi": "스카시",
+    "flex": "플렉스",
+}
+
+
+def rgb_to_hex(color_bgr: np.ndarray) -> str:
+    """
+    BGR(0-255) numpy 배열을 HEX 문자열(#RRGGBB)로 변환.
+    """
+    b, g, r = [int(x) for x in color_bgr]
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def extract_colors(image_path: Path) -> Tuple[str, str]:
+    """
+    실제 사진에서 배경색, 텍스트색 추출.
+
+    - 이미지를 읽고 중앙 50% 영역을 간판 영역으로 가정
+    - KMeans(n_clusters=2)로 대표 색상 2개 추출
+    - 더 밝은 색을 배경, 더 어두운 색을 텍스트로 사용
+    """
+    img = cv2.imread(str(image_path))
+    if img is None:
+        raise ValueError(f"이미지를 읽을 수 없습니다: {image_path}")
+
+    h, w = img.shape[:2]
+    if h < 10 or w < 10:
+        raise ValueError(f"이미지 크기가 너무 작습니다: {image_path} ({w}x{h})")
+
+    # 중앙 50% 영역 크롭
+    y1, y2 = h // 4, 3 * h // 4
+    x1, x2 = w // 4, 3 * w // 4
+    signboard = img[y1:y2, x1:x2]
+
+    # K-means 위한 데이터 준비
+    pixels = signboard.reshape(-1, 3).astype(np.float32)
+
+    # 너무 작은 경우 대비
+    if pixels.shape[0] < 10:
+        mean_color = np.mean(signboard.reshape(-1, 3), axis=0)
+        bg_hex = rgb_to_hex(mean_color)
+        # 텍스트색은 단순 대비색으로 설정
+        text_hex = "#ffffff" if np.mean(mean_color) < 128 else "#000000"
+        return bg_hex, text_hex
+
+    kmeans = KMeans(n_clusters=2, random_state=42, n_init=10)
+    kmeans.fit(pixels)
+    colors = kmeans.cluster_centers_  # BGR
+
+    brightness = [np.mean(c) for c in colors]
+    if brightness[0] > brightness[1]:
+        bg_color = colors[0]
+        text_color = colors[1]
+    else:
+        bg_color = colors[1]
+        text_color = colors[0]
+
+    bg_hex = rgb_to_hex(bg_color)
+    text_hex = rgb_to_hex(text_color)
+    return bg_hex, text_hex
+
+
+def center_crop_and_resize(
+    img: np.ndarray, size: int = 512
+) -> np.ndarray:
+    """
+    이미지를 중앙 기준으로 정사각형 크롭 후 size x size 로 리사이즈.
+    (BGR 이미지 입력, BGR 출력)
+    """
+    h, w = img.shape[:2]
+    # 정사각형 중앙 크롭
+    side = min(h, w)
+    y1 = (h - side) // 2
+    x1 = (w - side) // 2
+    cropped = img[y1 : y1 + side, x1 : x1 + side]
+    resized = cv2.resize(cropped, (size, size), interpolation=cv2.INTER_AREA)
+    return resized
+
+
+def load_labels(labels_path: Path) -> List[Dict]:
+    """
+    labels.json을 읽어서 개별 샘플 리스트로 평탄화.
+
+    반환되는 각 엔트리 예시:
+    {
+      "sign_type": "flex",
+      "time": "day",
+      "real_photo": "phase2_data/real_photos/flex/day/....jpg",
+      "id": "flex_xxx_day",
+      ...
+    }
+    """
+    if not labels_path.exists():
+        raise FileNotFoundError(f"labels.json을 찾을 수 없습니다: {labels_path}")
+
+    with labels_path.open("r", encoding="utf-8") as f:
+        raw = json.load(f)
+
+    samples: List[Dict] = []
+    for sign_type, time_dict in raw.items():
+        for time_key, entries in time_dict.items():
+            for entry in entries:
+                # labels.json 안에 이미 sign_type/time 이 있을 수 있지만, 없을 경우를 대비해 보정
+                e = dict(entry)
+                e.setdefault("sign_type", sign_type)
+                e.setdefault("time", time_key)
+                samples.append(e)
+    return samples
+
+
+def generate_phase1_image(
+    text: str,
+    sign_type_key: str,
+    bg_color: str,
+    text_color: str,
+    width: int = 512,
+    height: int = 512,
+) -> np.ndarray:
+    """
+    Phase 1 간판 이미지를 생성.
+
+    - sign_type_key: 'channel' / 'scasi' / 'flex'
+    - bg_color, text_color: '#RRGGBB' 형식
+    """
+    if sign_type_key not in SIGN_TYPE_MAP:
+        raise ValueError(f"알 수 없는 sign_type: {sign_type_key}")
+
+    sign_type_value = SIGN_TYPE_MAP[sign_type_key]
+
+    # render_signboard는 BGR numpy 배열을 반환
+    day_img, _ = render_signboard(
+        text=text,
+        logo_path="",
+        logo_type="channel",  # 기본값
+        installation_type="맨벽",
+        sign_type=sign_type_value,
+        bg_color=bg_color,
+        text_color=text_color,
+        text_direction="horizontal",
+        font_size=100,
+        text_position_x=50,
+        text_position_y=50,
+        width=width,
+        height=height,
+    )
+
+    if day_img is None:
+        raise RuntimeError("render_signboard 결과가 None 입니다.")
+
+    return day_img
+
+
+def build_pairs(
+    real_root: Path,
+    output_root: Path,
+    labels_path: Path,
+    split_ratio: float,
+    default_text: str = "간판",
+) -> None:
+    """
+    전체 pipeline:
+    - labels.json 로드
+    - 각 real_photo에 대해 색상 추출 + Phase1 생성
+    - 중앙 크롭/리사이즈 (512x512)
+    - train/test 로 split 후 저장
+    - pairs_metadata.json 저장
+    """
+    samples = load_labels(labels_path)
+    if not samples:
+        print("[WARN] labels.json에 샘플이 없습니다.")
+        return
+
+    print(f"[INFO] labels.json 에서 {len(samples)}개 샘플 로드")
+
+    # 절대 경로 보정
+    resolved_samples: List[Dict] = []
+    for s in samples:
+        real_rel = s.get("real_photo")
+        if not real_rel:
+            continue
+        real_path = (labels_path.parent / real_rel).resolve()
+        if not real_path.exists():
+            print(f"[WARN] 실제 사진을 찾을 수 없어 스킵: {real_path}")
+            continue
+        s["real_path"] = real_path
+        resolved_samples.append(s)
+
+    if not resolved_samples:
+        print("[WARN] 사용할 수 있는 실제 사진이 없습니다.")
+        return
+
+    # 셔플 + train/test 분리
+    random.seed(42)
+    random.shuffle(resolved_samples)
+
+    total = len(resolved_samples)
+    train_count = int(total * split_ratio)
+    train_samples = resolved_samples[:train_count]
+    test_samples = resolved_samples[train_count:]
+
+    print(
+        f"[INFO] 총 {total}개 → train {len(train_samples)}개, test {len(test_samples)}개 (split={split_ratio})"
+    )
+
+    # 출력 디렉토리 생성
+    for subset in ["train", "test"]:
+        (output_root / subset / "input").mkdir(parents=True, exist_ok=True)
+        (output_root / subset / "target").mkdir(parents=True, exist_ok=True)
+
+    metadata: Dict[str, Dict] = {}
+
+    def process_subset(subset_name: str, subset_samples: List[Dict], start_index: int) -> int:
+        index = start_index
+        for s in subset_samples:
+            index += 1
+            pair_id = f"{index:04d}"
+
+            sign_type_key = s.get("sign_type")
+            time_key = s.get("time", "day")
+            real_path: Path = s["real_path"]
+
+            print(f"\n[{subset_name.upper()}] [{pair_id}] {real_path.name}")
+            print(f"  - type={sign_type_key}, time={time_key}")
+
+            # 실제 이미지 로드
+            real_img = cv2.imread(str(real_path))
+            if real_img is None:
+                print(f"  [WARN] 실제 사진 로드 실패, 스킵: {real_path}")
+                continue
+
+            try:
+                # 색상 추출
+                bg_hex, text_hex = extract_colors(real_path)
+                print(f"  - colors: bg={bg_hex}, text={text_hex}")
+            except Exception as e:
+                print(f"  [WARN] 색상 추출 실패({e}), 기본 색상 사용")
+                bg_hex, text_hex = "#6b2d8f", "#ffffff"
+
+            try:
+                # Phase1 생성
+                phase1_img = generate_phase1_image(
+                    text=default_text,
+                    sign_type_key=sign_type_key,
+                    bg_color=bg_hex,
+                    text_color=text_hex,
+                    width=512,
+                    height=512,
+                )
+            except Exception as e:
+                print(f"  [ERROR] Phase1 생성 실패, 스킵: {e}")
+                continue
+
+            # 전처리: 중앙 크롭 + 리사이즈 (실제/Phase1 모두)
+            real_cropped = center_crop_and_resize(real_img, size=512)
+            phase1_cropped = center_crop_and_resize(phase1_img, size=512)
+
+            # 저장 경로
+            subset_dir = output_root / subset_name
+            input_path = subset_dir / "input" / f"{pair_id}.png"
+            target_path = subset_dir / "target" / f"{pair_id}.jpg"
+
+            # 저장
+            cv2.imwrite(str(input_path), phase1_cropped)
+            cv2.imwrite(str(target_path), real_cropped)
+
+            print(f"  - saved input : {input_path.relative_to(output_root)}")
+            print(f"  - saved target: {target_path.relative_to(output_root)}")
+
+            # 메타데이터 기록 (pair_id 기준)
+            metadata[pair_id] = {
+                "sign_type": sign_type_key,
+                "time": time_key,
+                "bg_color": bg_hex,
+                "text_color": text_hex,
+                "real_photo": str(real_path.relative_to(labels_path.parent)),
+                "phase1_input": str(input_path.relative_to(output_root)),
+                "phase1_target": str(target_path.relative_to(output_root)),
+            }
+
+        return index
+
+    print("\n[INFO] Train 세트 생성 시작...")
+    current_index = 0
+    current_index = process_subset("train", train_samples, current_index)
+
+    print("\n[INFO] Test 세트 생성 시작...")
+    current_index = process_subset("test", test_samples, current_index)
+
+    # 메타데이터 저장
+    meta_path = output_root / "pairs_metadata.json"
+    with meta_path.open("w", encoding="utf-8") as f:
+        json.dump(metadata, f, ensure_ascii=False, indent=2)
+
+    print("\n[INFO] 완료!")
+    print(f"  - 총 pair 수: {len(metadata)}")
+    print(f"  - 메타데이터: {meta_path}")
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Phase 2 학습용 Input/Target pair 생성")
+    parser.add_argument(
+        "--real",
+        type=str,
+        required=False,
+        default="phase2_data/real_photos",
+        help="실제 사진이 있는 루트 폴더 (기본: phase2_data/real_photos)",
+    )
+    parser.add_argument(
+        "--output",
+        type=str,
+        required=False,
+        default="phase2_data/paired_data",
+        help="pair 데이터를 저장할 폴더 (기본: phase2_data/paired_data)",
+    )
+    parser.add_argument(
+        "--labels",
+        type=str,
+        required=False,
+        default="phase2_data/labels.json",
+        help="labels.json 경로 (기본: phase2_data/labels.json)",
+    )
+    parser.add_argument(
+        "--split",
+        type=float,
+        required=False,
+        default=0.8,
+        help="train 비율 (0~1, 기본: 0.8)",
+    )
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+
+    real_root = Path(args.real).resolve()
+    output_root = Path(args.output).resolve()
+    labels_path = Path(args.labels).resolve()
+
+    print("[INFO] 설정")
+    print(f"  - real_root : {real_root}")
+    print(f"  - output_root: {output_root}")
+    print(f"  - labels     : {labels_path}")
+    print(f"  - split      : {args.split}")
+
+    build_pairs(
+        real_root=real_root,
+        output_root=output_root,
+        labels_path=labels_path,
+        split_ratio=args.split,
+    )
+
+
+if __name__ == "__main__":
+    main()
+
+---
+
+## 참고 정보
+
+### labels.json 구조
+```json
+{
+  "channel": {
+    "day": [
+      {
+        "id": "channel_xxx_day",
+        "real_photo": "phase2_data/real_photos/channel/day/channel_xxx_day.jpg",
+        "sign_type": "channel",
+        "time": "day",
+        "date_labeled": "2024-01-01 12:00:00",
+        "original_filename": "xxx.jpg"
+      }
+    ],
+    "night": []
+  },
+  "scasi": {"day": [], "night": []},
+  "flex": {"day": [], "night": []}
+}
+```
+
+### render_signboard 함수 (main.py에서 사용)
+- 입력: text, sign_type, bg_color, text_color, width, height 등
+- 출력: (day_img: np.ndarray, night_img: np.ndarray) 튜플
+- day_img는 BGR 형식의 numpy 배열
+
+### 주요 의존성
+- tkinter (GUI)
+- PIL/Pillow (이미지 처리)
+- opencv-python (cv2)
+- numpy
+- scikit-learn (KMeans)
+
+---
+
+검토 결과를 다음 형식으로 정리해주세요:
+
+## 발견된 이슈
+
+### Critical (즉시 수정 필요)
+1. [이슈 설명]
+   - 위치: 파일명:줄번호
+   - 문제: [상세 설명]
+   - 수정 제안: [해결 방법]
+
+### Warning (개선 권장)
+1. [이슈 설명]
+   - 위치: 파일명:줄번호
+   - 문제: [상세 설명]
+   - 수정 제안: [해결 방법]
+
+### Info (참고사항)
+1. [이슈 설명]
+   - 위치: 파일명:줄번호
+   - 개선 제안: [제안 내용]
+

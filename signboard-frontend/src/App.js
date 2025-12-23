@@ -36,6 +36,9 @@ function App() {
   const [lightsEnabled, setLightsEnabled] = useState(true);
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [loadingPhase, setLoadingPhase] = useState(null); // 'basic' or 'ai'
+  const [loadingProgress, setLoadingProgress] = useState(0); // 0-100
+  const [showComingSoonModal, setShowComingSoonModal] = useState(false);
   const isFirstRender = useRef(true);
 
   const getCurrentSignboard = () =>
@@ -68,21 +71,32 @@ function App() {
       return;
     }
     
-    // 시뮬레이션 결과가 있을 때만 자동 반영
+    // 시뮬레이션 결과가 있을 때만 자동 반영 (기본 모드로)
     if (results) {
-      handleGenerate();
+      handleGenerate('basic');
     }
   }, [lightsEnabled]);
 
   const handleApplyLights = async () => {
-    // 조명 반영하기: 현재 조명 상태로 재생성
+    // 조명 반영하기: 현재 조명 상태로 재생성 (기본 모드로)
     console.log('[프론트엔드] 조명 반영하기 버튼 클릭');
     console.log('[프론트엔드] 현재 lights:', lights);
     console.log('[프론트엔드] lightsEnabled:', lightsEnabled);
-    await handleGenerate();
+    await handleGenerate('basic');
   };
 
-  const handleGenerate = async () => {
+  // Phase 1만 실행 (빠른 생성)
+  const handleQuickGenerate = async () => {
+    await handleGenerate('basic');
+  };
+
+  // Phase 1 + Phase 2 실행 (AI 고품질)
+  const handleAIGenerate = async () => {
+    await handleGenerate('ai');
+  };
+
+  // 공통 생성 함수
+  const handleGenerate = async (mode = 'basic') => {
     if (!buildingImage) {
       alert('건물 사진을 업로드해주세요.');
       return;
@@ -92,6 +106,9 @@ function App() {
       alert('간판을 하나 이상 추가하고 영역을 선택해주세요.');
       return;
     }
+
+    setLoadingPhase(mode);
+    setLoadingProgress(0);
 
     // 각 간판별 유효성 검사
     for (const sb of signboards) {
@@ -213,6 +230,10 @@ function App() {
       console.log('[프론트엔드] API 요청 직전 - lights:', JSON.stringify(lights));
       console.log('[프론트엔드] API 요청 직전 - lights_enabled:', lightsEnabled);
 
+      // Phase 1 진행 상태 업데이트
+      setLoadingProgress(30);
+
+      // Phase 1: 기본 생성
       const response = await fetch('http://localhost:8000/api/generate-simulation', {
         method: 'POST',
         body: formDataToSend
@@ -224,15 +245,68 @@ function App() {
         throw new Error(data.error);
       }
       
+      console.log('[프론트엔드] Phase 1 완료');
+      setLoadingProgress(70);
+
+      // Phase 2: AI 고품질 모드인 경우
+      if (mode === 'ai') {
+        try {
+          setLoadingProgress(80);
+          
+          // Phase 2 API 호출 (나중에 구현)
+          const aiResponse = await fetch('http://localhost:8000/api/generate-hq', {
+            method: 'POST',
+            body: formDataToSend
+          });
+
+          const aiData = await aiResponse.json();
+          
+          if (aiData.error) {
+            console.warn('AI 개선 실패, 기본 품질로 표시:', aiData.error);
+            // AI 실패해도 Phase 1 결과는 표시
+            setResults({
+              ...data,
+              ai_image: null,
+              ai_error: aiData.error
+            });
+          } else {
+            // AI 성공: AI 결과 사용
+            setResults({
+              day_simulation: aiData.day_simulation || data.day_simulation,
+              night_simulation: aiData.night_simulation || data.night_simulation,
+              basic_day_simulation: data.day_simulation, // 비교용
+              basic_night_simulation: data.night_simulation, // 비교용
+              ai_image: aiData.ai_image,
+              processing_time: aiData.processing_time
+            });
+          }
+          
+          setLoadingProgress(100);
+        } catch (aiError) {
+          console.error('AI 개선 중 오류:', aiError);
+          // AI 실패해도 Phase 1 결과는 표시
+          setResults({
+            ...data,
+            ai_image: null,
+            ai_error: aiError.message
+          });
+          setLoadingProgress(100);
+        }
+      } else {
+        // Phase 1만: 기본 결과 사용
+        setResults(data);
+        setLoadingProgress(100);
+      }
+      
       console.log('[프론트엔드] API 응답 받음');
       console.log('[프론트엔드] setResults 호출 전 - results:', results);
-      setResults(data);
-      console.log('[프론트엔드] setResults 호출 후');
     } catch (error) {
       console.error('Error:', error);
       alert('시뮬레이션 생성 중 오류가 발생했습니다: ' + error.message);
     } finally {
       setLoading(false);
+      setLoadingPhase(null);
+      setLoadingProgress(0);
     }
   };
 
@@ -579,26 +653,166 @@ function App() {
           </motion.div>
         </div>
 
-        {/* 시안 생성하기 버튼 (전체 너비) */}
-        <motion.button
-          onClick={handleGenerate}
-          disabled={loading}
-          whileHover={{ scale: loading ? 1 : 1.02 }}
-          whileTap={{ scale: loading ? 1 : 0.98 }}
-          className="w-full bg-gradient-to-r from-blue-500 to-purple-600 rounded-lg px-8 py-4 text-white font-semibold shadow-lg disabled:from-gray-600 disabled:to-gray-700 disabled:cursor-not-allowed transition-all"
-        >
-          {loading ? (
-            <span className="flex items-center justify-center">
-              <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
-              생성 중...
+        {/* 시안 생성 버튼 2개 (빠른 생성 / AI 고품질) */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* 빠른 생성 버튼 (Phase 1만) */}
+          <motion.button
+            onClick={handleQuickGenerate}
+            disabled={loading}
+            whileHover={{ scale: loading ? 1 : 1.02 }}
+            whileTap={{ scale: loading ? 1 : 0.98 }}
+            className="relative bg-gradient-to-r from-blue-500 to-purple-600 rounded-lg px-6 py-4 text-white font-semibold shadow-lg disabled:from-gray-600 disabled:to-gray-700 disabled:cursor-not-allowed transition-all flex flex-col items-center gap-1"
+          >
+            {loading && loadingPhase === 'basic' ? (
+              <span className="flex items-center justify-center gap-2">
+                <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+                생성 중...
+              </span>
+            ) : (
+              <>
+                <span className="text-lg">⚡ 빠른 생성</span>
+                <span className="text-xs opacity-80">즉시 • 기본 품질</span>
+              </>
+            )}
+            {/* 진행률 표시 */}
+            {loading && loadingPhase === 'basic' && loadingProgress > 0 && (
+              <div className="absolute bottom-0 left-0 right-0 h-1 bg-blue-300/30 rounded-b-lg overflow-hidden">
+                <motion.div
+                  className="h-full bg-blue-200"
+                  initial={{ width: 0 }}
+                  animate={{ width: `${loadingProgress}%` }}
+                  transition={{ duration: 0.3 }}
+                />
+              </div>
+            )}
+          </motion.button>
+
+          {/* AI 고품질 버튼 (Phase 1 + Phase 2) - 준비 중 상태 */}
+          <motion.button
+            onClick={() => setShowComingSoonModal(true)}
+            disabled={true}
+            className="relative bg-gradient-to-br from-gray-600 to-gray-700 rounded-lg px-6 py-4 text-white font-semibold opacity-60 cursor-not-allowed transition-all flex flex-col items-center gap-1"
+            title="AI 품질 개선 기능은 Phase 2에서 제공됩니다 (Week 7 출시 예정)"
+          >
+            {/* 준비 중 배지 */}
+            <span className="absolute -top-2 -right-2 bg-orange-500 text-white text-xs font-bold px-2 py-1 rounded-full">
+              준비 중
             </span>
-          ) : (
-            '🎨 시안 생성하기'
-          )}
-        </motion.button>
+            
+            <div className="flex items-center gap-2 text-lg">
+              <span className="opacity-50">✨</span>
+              <span>AI 고품질</span>
+            </div>
+            <span className="text-xs opacity-60">Week 7 출시 예정</span>
+          </motion.button>
+        </div>
+
+        {/* 로딩 상태 상세 표시 */}
+        {loading && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mt-4 p-4 bg-gray-800/50 rounded-lg border border-gray-700"
+          >
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-gray-300">
+                  {loadingPhase === 'basic' ? '⚡ 빠른 생성 중' : '✨ AI 고품질 생성 중'}
+                </span>
+                <span className="text-gray-400">{loadingProgress}%</span>
+              </div>
+              
+              {/* 단계별 진행 상태 */}
+              <div className="space-y-1 text-xs text-gray-400">
+                {loadingPhase === 'basic' ? (
+                  <>
+                    <div className={loadingProgress >= 30 ? 'text-green-400' : ''}>
+                      {loadingProgress >= 30 ? '✓' : '○'} 간판 렌더링
+                    </div>
+                    <div className={loadingProgress >= 70 ? 'text-green-400' : loadingProgress >= 30 ? 'text-yellow-400' : ''}>
+                      {loadingProgress >= 70 ? '✓' : loadingProgress >= 30 ? '⏳' : '○'} 건물 합성
+                    </div>
+                    <div className={loadingProgress >= 100 ? 'text-green-400' : ''}>
+                      {loadingProgress >= 100 ? '✓' : '○'} 완료
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className={loadingProgress >= 30 ? 'text-green-400' : ''}>
+                      {loadingProgress >= 30 ? '✓' : '○'} 간판 렌더링
+                    </div>
+                    <div className={loadingProgress >= 70 ? 'text-green-400' : loadingProgress >= 30 ? 'text-yellow-400' : ''}>
+                      {loadingProgress >= 70 ? '✓' : loadingProgress >= 30 ? '⏳' : '○'} 건물 합성
+                    </div>
+                    <div className={loadingProgress >= 100 ? 'text-green-400' : loadingProgress >= 80 ? 'text-yellow-400' : ''}>
+                      {loadingProgress >= 100 ? '✓' : loadingProgress >= 80 ? '⏳' : '○'} AI 품질 개선
+                    </div>
+                    <div className={loadingProgress >= 100 ? 'text-green-400' : ''}>
+                      {loadingProgress >= 100 ? '✓' : '○'} 완료
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {/* AI 고품질 준비 중 모달 */}
+        {showComingSoonModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+            onClick={() => setShowComingSoonModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-gray-800 rounded-2xl p-6 max-w-md mx-4 border border-gray-700"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+                <span>🚀</span>
+                <span>AI 고품질 모드 준비 중</span>
+              </h3>
+              <p className="text-gray-300 mb-6 leading-relaxed">
+                AI 품질 개선 기능은 현재 개발 중입니다.
+                <br /><br />
+                <strong className="text-white">출시 예정:</strong> Week 7 (약 2주 후)
+                <br /><br />
+                <strong className="text-white">주요 기능:</strong>
+                <br />
+                • Phase 1 결과를 실사 수준으로 개선
+                <br />
+                • 디테일 추가 (천 텍스처, 금속 반사 등)
+                <br />
+                • 처리 시간: 2-3초
+              </p>
+              <div className="flex gap-3">
+                <button
+                  className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-white font-medium transition-colors"
+                  onClick={() => {
+                    alert('알림 신청이 완료되었습니다!');
+                    setShowComingSoonModal(false);
+                  }}
+                >
+                  알림 신청
+                </button>
+                <button
+                  className="flex-1 px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-white font-medium transition-colors"
+                  onClick={() => setShowComingSoonModal(false)}
+                >
+                  닫기
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
       </div>
     </div>
   );
