@@ -1075,18 +1075,11 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
             sys.stdout.flush()
             print(f"[전면프레임 블렌딩] 시작: text_color={text_color}, bg_color={bg_color}", flush=True)
             # 투명 배경에서 레이어 쌓기 (배경 색과 독립적으로)
+            # 전면프레임은 그림자 없음 (프레임에 붙어있어서 그림자가 생기지 않음)
             h, w = day_result.shape[:2]
             result = np.zeros((h, w, 4), dtype=np.float32)  # RGBA
             
-            # 1. 그림자 레이어 (알파 40%)
-            shadow_alpha = shadow_layer_rgba[:, :, 3:4].astype(np.float32) / 255.0 * 0.4
-            shadow_rgb = shadow_layer_rgba[:, :, :3].astype(np.float32)
-            
-            # 알파 합성
-            result[:, :, :3] = result[:, :, :3] * (1 - shadow_alpha) + shadow_rgb * shadow_alpha
-            result[:, :, 3:4] = np.maximum(result[:, :, 3:4], shadow_alpha)
-            
-            # 2. 옆면 레이어 (앞면 영역 제외)
+            # 1. 옆면 레이어 (앞면 영역 제외) - 입체감을 위한 옆면만
             side_alpha = side_layer_rgba[:, :, 3:4].astype(np.float32) / 255.0
             side_rgb = side_layer_rgba[:, :, :3].astype(np.float32)
             text_mask = text_layer_rgba[:, :, 3:4].astype(np.float32) / 255.0
@@ -1098,7 +1091,7 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
             result[:, :, :3] = result[:, :, :3] * (1 - side_alpha_adjusted) + side_rgb * side_alpha_adjusted
             result[:, :, 3:4] = np.maximum(result[:, :, 3:4], side_alpha_adjusted)
             
-            # 3. 앞면 레이어 (100% 불투명)
+            # 2. 앞면 레이어 (100% 불투명)
             text_alpha = text_layer_rgba[:, :, 3:4].astype(np.float32) / 255.0
             text_rgb = text_layer_rgba[:, :, :3].astype(np.float32)
             
@@ -1106,11 +1099,11 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
             result[:, :, :3] = result[:, :, :3] * (1 - text_alpha) + text_rgb * text_alpha
             result[:, :, 3:4] = np.maximum(result[:, :, 3:4], text_alpha)
             
-            # 4. RGB -> BGR 변환 (result[:, :, :3]은 RGB 순서이므로 BGR로 변환 필요)
+            # 3. RGB -> BGR 변환 (result[:, :, :3]은 RGB 순서이므로 BGR로 변환 필요)
             result_rgb = result[:, :, :3].astype(np.uint8)
             result_bgr = cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR).astype(np.float32)
             
-            # 5. 배경과 합성 (BGR 순서로 통일)
+            # 4. 배경과 합성 (BGR 순서로 통일)
             result_alpha = result[:, :, 3:4] / 255.0 if result[:, :, 3].max() > 1 else result[:, :, 3:4]
             bg = day_result.astype(np.float32)
             
