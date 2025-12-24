@@ -43,13 +43,28 @@ from main import render_signboard
 
 # 라벨링에서 사용한 sign_type_key → (Phase 1 sign_type, installation_type) 매핑
 SIGN_TYPE_MAP = {
-    "channel_wall": ("전광채널", "맨벽"),
-    "channel_frame_bar": ("전광채널", "프레임바"),
-    "channel_frame_plate": ("전광채널", "프레임판"),
+    # 전광채널 (Front-lit Channel)
+    "channel_front_wall": ("전광채널", "맨벽"),
+    "channel_front_frame_bar": ("전광채널", "프레임바"),
+    "channel_front_frame_plate": ("전광채널", "전면프레임"),
+    # 후광채널 (Back-lit Channel)
+    "channel_back_wall": ("후광채널", "맨벽"),
+    "channel_back_frame_bar": ("후광채널", "프레임바"),
+    "channel_back_frame_plate": ("후광채널", "전면프레임"),
+    # 전후광채널 (Front/Back-lit Channel)
+    "channel_front_back_wall": ("전후광채널", "맨벽"),
+    "channel_front_back_frame_bar": ("전후광채널", "프레임바"),
+    "channel_front_back_frame_plate": ("전후광채널", "전면프레임"),
+    # 스카시
     "scasi_wall": ("스카시", "맨벽"),
     "scasi_frame_bar": ("스카시", "프레임바"),
-    "scasi_frame_plate": ("스카시", "프레임판"),
-    "flex_frame_plate": ("플렉스", "프레임판"),
+    "scasi_frame_plate": ("스카시", "전면프레임"),
+    # 플렉스
+    "flex_frame_plate": ("플렉스", "전면프레임"),
+    # 하위 호환성: 기존 channel_wall 등도 지원 (전광으로 매핑)
+    "channel_wall": ("전광채널", "맨벽"),
+    "channel_frame_bar": ("전광채널", "프레임바"),
+    "channel_frame_plate": ("전광채널", "전면프레임"),
 }
 
 
@@ -272,6 +287,7 @@ def generate_phase1_image(
     text_color: str,
     width: int = 512,
     height: int = 512,
+    lights_enabled: bool = False,
 ) -> np.ndarray:
     """
     Phase 1 간판 이미지를 생성.
@@ -300,6 +316,7 @@ def generate_phase1_image(
         width=width,
         height=height,
         use_actual_bg_for_training=True,  # 학습 데이터용: 실제 배경색 사용
+        lights_enabled=lights_enabled,  # 조명 효과 적용 여부
     )
 
     if day_img is None:
