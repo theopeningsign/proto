@@ -1168,25 +1168,91 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
 
         day_result = signboard_np.copy()
 
-        # 그림자 alpha (40%) 적용
-        shadow_alpha = (shadow_layer_rgba[:, :, 3].astype(np.float32) / 255.0) * 0.4
-        shadow_alpha_3ch = np.stack([shadow_alpha, shadow_alpha, shadow_alpha], axis=2)
-        day_f = day_result.astype(np.float32)
-        day_f = day_f * (1 - shadow_alpha_3ch) + shadow_layer_bgr.astype(np.float32) * shadow_alpha_3ch
+        # 전면프레임인 경우 alpha 블렌딩 사용 (배경색과 섞이지 않도록) - 전광채널과 동일
+        if installation_type == "전면프레임":
+            sys.stdout.write(f"[후광채널 전면프레임 블렌딩] 시작: text_color={text_color}, bg_color={bg_color}\n")
+            sys.stdout.flush()
+            print(f"[후광채널 전면프레임 블렌딩] 시작: text_color={text_color}, bg_color={bg_color}", flush=True)
+            # 투명 배경에서 레이어 쌓기 (배경 색과 독립적으로)
+            # 전면프레임은 그림자 없음 (프레임에 붙어있어서 그림자가 생기지 않음)
+            h, w = day_result.shape[:2]
+            result = np.zeros((h, w, 4), dtype=np.float32)  # RGBA
+            
+            # 1. 옆면 레이어 (앞면 영역 제외) - 입체감을 위한 옆면만
+            side_alpha = side_layer_rgba[:, :, 3:4].astype(np.float32) / 255.0
+            side_rgb = side_layer_rgba[:, :, :3].astype(np.float32)
+            text_mask = text_layer_rgba[:, :, 3:4].astype(np.float32) / 255.0
+            
+            # 앞면 영역 제외
+            side_alpha_adjusted = side_alpha * (1 - text_mask)
+            
+            # 알파 합성
+            result[:, :, :3] = result[:, :, :3] * (1 - side_alpha_adjusted) + side_rgb * side_alpha_adjusted
+            result[:, :, 3:4] = np.maximum(result[:, :, 3:4], side_alpha_adjusted)
+            
+            # 2. 앞면 레이어 (100% 불투명)
+            text_alpha = text_layer_rgba[:, :, 3:4].astype(np.float32) / 255.0
+            text_rgb = text_layer_rgba[:, :, :3].astype(np.float32)
+            
+            # 알파 합성
+            result[:, :, :3] = result[:, :, :3] * (1 - text_alpha) + text_rgb * text_alpha
+            result[:, :, 3:4] = np.maximum(result[:, :, 3:4], text_alpha)
+            
+            # 3. RGB -> BGR 변환 (result[:, :, :3]은 RGB 순서이므로 BGR로 변환 필요)
+            result_rgb = result[:, :, :3].astype(np.uint8)
+            result_bgr = cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR).astype(np.float32)
+            
+            # 4. 배경과 합성 (BGR 순서로 통일)
+            result_alpha = result[:, :, 3:4] / 255.0 if result[:, :, 3].max() > 1 else result[:, :, 3:4]
+            bg = day_result.astype(np.float32)
+            
+            final = bg * (1 - result_alpha) + result_bgr * result_alpha
+            day_result = np.clip(final, 0, 255).astype(np.uint8)
+            
+            # 샘플 확인 (텍스트 영역)
+            text_region_mask = text_layer_rgba[:, :, 3] > 0
+            if text_region_mask.any():
+                sample_y, sample_x = np.where(text_region_mask)
+                if len(sample_y) > 0:
+                    idx = len(sample_y) // 2
+                    y, x = sample_y[idx], sample_x[idx]
+                    text_rgb_value = text_layer_rgba[y, x, :3]
+                    text_bgr_value = text_layer_bgr[y, x]
+                    final_value = day_result[y, x]
+                    sys.stdout.write(f"[후광채널 전면프레임 블렌딩] 완료 - 텍스트 샘플[{y},{x}]: text_rgba={text_rgb_value}, text_bgr={text_bgr_value}, 최종={final_value}\n")
+                    sys.stdout.flush()
+                    print(f"[후광채널 전면프레임 블렌딩] 완료 - 텍스트 샘플[{y},{x}]: text_rgba={text_rgb_value}, text_bgr={text_bgr_value}, 최종={final_value}", flush=True)
+            
+            # 전면프레임은 add_3d_depth를 적용하지 않음 (이미 블렌딩 완료)
+            result = day_result
+        else:
+            # 맨벽/프레임바: 기존 방식 (투명 배경이므로 add 사용 가능)
+            # 그림자 alpha (40%) 적용
+            shadow_alpha = (shadow_layer_rgba[:, :, 3].astype(np.float32) / 255.0) * 0.4
+            shadow_alpha_3ch = np.stack([shadow_alpha, shadow_alpha, shadow_alpha], axis=2)
+            day_f = day_result.astype(np.float32)
+            day_f = day_f * (1 - shadow_alpha_3ch) + shadow_layer_bgr.astype(np.float32) * shadow_alpha_3ch
 
-        # 옆면, 앞면 합성
-        day_f = cv2.add(day_f.astype(np.uint8), side_layer_bgr)
-        day_f = cv2.add(day_f, text_layer_bgr)
+            # 옆면, 앞면 합성
+            day_result = cv2.add(day_f.astype(np.uint8), side_layer_bgr)
+            day_result = cv2.add(day_result, text_layer_bgr)
+            
+            # 맨벽/프레임바는 입체감 추가
+            if installation_type == "프레임바":
+                day_result = add_3d_depth(day_result, depth=5)
+            elif installation_type == "맨벽":
+                day_result = add_3d_depth(day_result, depth=5)
+            
+            result = day_result
 
+        # 후광채널/전후광채널 glow 처리
         if sign_type == "후광채널":
             # 후광채널: 주간에는 glow 없이 3D 텍스트만
-            result = day_f
+            pass  # result는 이미 설정됨
         else:
             # 전후광채널: 주간에는 전광채널처럼 약한 glow 효과 추가
             text_glow = safe_gaussian_blur(text_layer_bgr, (25, 25), 10)
-            result = cv2.addWeighted(day_f, 1.0, text_glow, 0.5, 0)
-        
-        result = add_3d_depth(result, depth=8)
+            result = cv2.addWeighted(result, 1.0, text_glow, 0.5, 0)
         
         # 후광채널/전후광채널일 때 text_layer 반환 (야간 효과 구현용)
         if sign_type in ["후광채널", "전후광채널"]:
@@ -1207,18 +1273,7 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
         side_layer_rgba = extract_text_layer(text_to_render, font, side_color, (width, height), side_position)
         side_layer_bgr = cv2.cvtColor(side_layer_rgba, cv2.COLOR_RGBA2BGR)
 
-        # 3) 텍스트 그림자 (검은색, 오른쪽 아래로 7px offset, 40% 투명도)
-        shadow_color = (0, 0, 0)
-        shadow_position = (position[0] + 7, position[1] + 7)
-        shadow_layer_rgba = extract_text_layer(text_to_render, font, shadow_color, (width, height), shadow_position)
-        shadow_layer_bgr = cv2.cvtColor(shadow_layer_rgba, cv2.COLOR_RGBA2BGR)
-
         result_f = signboard_np.copy().astype(np.float32)
-
-        # 그림자 alpha (40%) 적용
-        shadow_alpha = (shadow_layer_rgba[:, :, 3].astype(np.float32) / 255.0) * 0.4
-        shadow_alpha_3ch = np.stack([shadow_alpha, shadow_alpha, shadow_alpha], axis=2)
-        result_f = result_f * (1 - shadow_alpha_3ch) + shadow_layer_bgr.astype(np.float32) * shadow_alpha_3ch
 
         # 옆면, 앞면 합성 (alpha blending 사용 - 색상 간섭 방지)
         # 옆면 alpha blending
@@ -1242,7 +1297,7 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
         texture = np.random.randint(-3, 3, result_f.shape, dtype=np.int16).astype(np.float32)
         result_f = np.clip(result_f + texture, 0, 255).astype(np.uint8)
 
-        result = add_3d_depth(result_f, depth=8)
+        result = add_3d_depth(result_f, depth=5)
         return result, None
     
     elif sign_type == "플렉스":
@@ -2340,4 +2395,13 @@ async def root():
     return {"message": "Signboard Simulation API"}
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    import os
+    # 현재 파일의 디렉토리를 reload 디렉토리로 설정
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    uvicorn.run(
+        "main:app", 
+        host="0.0.0.0", 
+        port=8000, 
+        reload=True,
+        reload_dirs=[current_dir]  # 백엔드 디렉토리 감시
+    )
