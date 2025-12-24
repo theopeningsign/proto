@@ -775,12 +775,16 @@ def render_scashi_signboard(text: str, bg_color: str, text_color: str, logo_img:
     
     return result
 
-def render_combined_signboard(installation_type: str, sign_type: str, text: str, bg_color: str, text_color: str, logo_img: Image.Image = None, logo_type: str = "channel", text_direction: str = "horizontal", font_size: int = 100, text_position_x: int = 50, text_position_y: int = 50, width: int = 1200, height: int = 300):
+def render_combined_signboard(installation_type: str, sign_type: str, text: str, bg_color: str, text_color: str, logo_img: Image.Image = None, logo_type: str = "channel", text_direction: str = "horizontal", font_size: int = 100, text_position_x: int = 50, text_position_y: int = 50, width: int = 1200, height: int = 300, use_actual_bg_for_training: bool = False):
     """설치 방식 + 간판 종류 조합 렌더링
     Returns: (signboard_image, text_layer)
     - 전광채널: (signboard, text_layer) - text_layer는 텍스트만 분리
     - 후광채널: (signboard, text_layer) - text_layer는 텍스트만 분리 (야간 효과용)
     - 기타: (signboard, None)
+    
+    Args:
+        use_actual_bg_for_training: True면 맨벽/프레임바도 실제 배경색 사용 (학습 데이터용)
+                                    False면 맨벽/프레임바는 투명 배경 (시안 생성용, 기본값)
     """
     # 스카시 재질 파싱
     material = None
@@ -792,8 +796,13 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
     # 배경 생성 (설치 방식에 따라) - 프레임바는 텍스트 크기 측정 후에 그려야 함
     is_frame_bar = (installation_type == "프레임바")
     if installation_type == "프레임바":
-        # 프레임바: 투명 배경 (나중에 텍스트 크기 측정 후 막대 그리기)
-        signboard = Image.new('RGBA', (width, height), (0, 0, 0, 0))  # 투명 배경
+        if use_actual_bg_for_training:
+            # 학습용: 실제 배경색 사용
+            bg_rgb = hex_to_rgb(bg_color) if bg_color.startswith('#') else (220, 220, 220)
+            signboard = Image.new('RGB', (width, height), color=bg_rgb)
+        else:
+            # 시안용: 투명 배경 (나중에 텍스트 크기 측정 후 막대 그리기)
+            signboard = Image.new('RGBA', (width, height), (0, 0, 0, 0))  # 투명 배경
     elif installation_type == "전면프레임":
         # 전면프레임: 사용자 지정 배경색 + 얇은 프레임
         bg_rgb = hex_to_rgb(bg_color) if bg_color.startswith('#') else (107, 45, 143)
@@ -810,12 +819,17 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
         
         signboard = signboard
     elif installation_type == "맨벽":
-        # 맨벽: 투명 배경 (글자만 벽에 직접 부착)
-        signboard = Image.new('RGBA', (width, height), (0, 0, 0, 0))
-        # RGB로 변환 (투명 부분은 검은색으로)
-        bg = Image.new('RGB', (width, height), (0, 0, 0))
-        bg.paste(signboard, (0, 0))
-        signboard = bg
+        if use_actual_bg_for_training:
+            # 학습용: 실제 배경색 사용
+            bg_rgb = hex_to_rgb(bg_color) if bg_color.startswith('#') else (220, 220, 220)
+            signboard = Image.new('RGB', (width, height), color=bg_rgb)
+        else:
+            # 시안용: 투명 배경 (글자만 벽에 직접 부착)
+            signboard = Image.new('RGBA', (width, height), (0, 0, 0, 0))
+            # RGB로 변환 (투명 부분은 검은색으로)
+            bg = Image.new('RGB', (width, height), (0, 0, 0))
+            bg.paste(signboard, (0, 0))
+            signboard = bg
     elif installation_type == "파사드":
         # 파사드: 사용자 지정 배경색 (깔끔한 외벽)
         bg_rgb = hex_to_rgb(bg_color) if bg_color.startswith('#') else (220, 220, 220)
@@ -1024,7 +1038,19 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
         frame_layer = (frame_layer.astype(np.float32) * (1 - text_alpha_3ch)).astype(np.uint8)
         
         # 프레임바 레이어를 signboard_np에 합성
-        signboard_np = cv2.add(signboard_np, frame_layer)
+        if use_actual_bg_for_training:
+            # 학습용: 배경이 있으므로 alpha 블렌딩 사용
+            # 막대가 있는 영역만 alpha 1.0 (frame_layer는 이미 텍스트 영역 제외됨)
+            frame_alpha = (frame_layer.sum(axis=2) > 0).astype(np.float32)
+            frame_alpha_3ch = np.stack([frame_alpha, frame_alpha, frame_alpha], axis=2)
+            
+            signboard_np = (
+                signboard_np.astype(np.float32) * (1 - frame_alpha_3ch) +
+                frame_layer.astype(np.float32) * frame_alpha_3ch
+            ).astype(np.uint8)
+        else:
+            # 시안용: 투명 배경이므로 cv2.add 사용 (기존 동작)
+            signboard_np = cv2.add(signboard_np, frame_layer)
     
     # 간판 종류에 따라 렌더링
     # 전광채널은 모든 설치방식에 대해 동일한 텍스트 렌더링 적용
@@ -1048,7 +1074,7 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
             text_to_render = text
     
     if sign_type == "전광채널":
-        # 전광채널: 모든 설치방식(맨벽, 프레임바, 프레임판)에 대해 그림자, 옆면, 앞면을 사용한 입체적 렌더링 (glow 없음)
+        # 전광채널: 모든 설치방식(맨벽, 프레임바, 프레임판)에 대해 옆면, 앞면을 사용한 입체적 렌더링 (glow 없음)
         # 1) 텍스트 앞면(원본 색상)
         text_layer_rgba = extract_text_layer(text_to_render, font, text_rgb, (width, height), position)
         text_layer_bgr = cv2.cvtColor(text_layer_rgba, cv2.COLOR_RGBA2BGR)
@@ -1060,12 +1086,6 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
         side_position = (position[0] + side_offset_x, position[1] + side_offset_y)
         side_layer_rgba = extract_text_layer(text_to_render, font, side_color, (width, height), side_position)
         side_layer_bgr = cv2.cvtColor(side_layer_rgba, cv2.COLOR_RGBA2BGR)
-
-        # 3) 텍스트 그림자 레이어 (검은색, 오른쪽 아래로 7px offset, 40% 투명도)
-        shadow_color = (0, 0, 0)
-        shadow_position = (position[0] + 7, position[1] + 7)
-        shadow_layer_rgba = extract_text_layer(text_to_render, font, shadow_color, (width, height), shadow_position)
-        shadow_layer_bgr = cv2.cvtColor(shadow_layer_rgba, cv2.COLOR_RGBA2BGR)
 
         day_result = signboard_np.copy()
 
@@ -1127,15 +1147,30 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
             # 전면프레임은 add_3d_depth를 적용하지 않음 (이미 블렌딩 완료)
         else:
             # 맨벽/프레임바: 기존 방식 (투명 배경이므로 add 사용 가능)
-            # 그림자 alpha (40%) 적용
-            shadow_alpha = (shadow_layer_rgba[:, :, 3].astype(np.float32) / 255.0) * 0.4
-            shadow_alpha_3ch = np.stack([shadow_alpha, shadow_alpha, shadow_alpha], axis=2)
             day_f = day_result.astype(np.float32)
-            day_f = day_f * (1 - shadow_alpha_3ch) + shadow_layer_bgr.astype(np.float32) * shadow_alpha_3ch
 
             # 옆면, 앞면 합성 (glow 없이)
-            day_result = cv2.add(day_f.astype(np.uint8), side_layer_bgr)
-            day_result = cv2.add(day_result, text_layer_bgr)
+            if use_actual_bg_for_training:
+                # 학습용: 배경이 있으므로 alpha 블렌딩 사용
+                # 옆면 alpha 블렌딩
+                side_alpha = side_layer_rgba[:, :, 3:4].astype(np.float32) / 255.0
+                side_alpha_3ch = np.repeat(side_alpha, 3, axis=2)
+                day_result = (
+                    day_f * (1 - side_alpha_3ch) +
+                    side_layer_bgr.astype(np.float32) * side_alpha_3ch
+                ).astype(np.uint8)
+                
+                # 앞면 alpha 블렌딩
+                text_alpha = text_layer_rgba[:, :, 3:4].astype(np.float32) / 255.0
+                text_alpha_3ch = np.repeat(text_alpha, 3, axis=2)
+                day_result = (
+                    day_result.astype(np.float32) * (1 - text_alpha_3ch) +
+                    text_layer_bgr.astype(np.float32) * text_alpha_3ch
+                ).astype(np.uint8)
+            else:
+                # 시안용: 투명 배경이므로 cv2.add 사용 (기존 동작)
+                day_result = cv2.add(day_f.astype(np.uint8), side_layer_bgr)
+                day_result = cv2.add(day_result, text_layer_bgr)
             
             # 맨벽/프레임바는 입체감 추가
             if installation_type == "프레임바":
@@ -1234,8 +1269,27 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
             day_f = day_f * (1 - shadow_alpha_3ch) + shadow_layer_bgr.astype(np.float32) * shadow_alpha_3ch
 
             # 옆면, 앞면 합성
-            day_result = cv2.add(day_f.astype(np.uint8), side_layer_bgr)
-            day_result = cv2.add(day_result, text_layer_bgr)
+            if use_actual_bg_for_training:
+                # 학습용: 배경이 있으므로 alpha 블렌딩 사용
+                # 옆면 alpha 블렌딩
+                side_alpha = side_layer_rgba[:, :, 3:4].astype(np.float32) / 255.0
+                side_alpha_3ch = np.repeat(side_alpha, 3, axis=2)
+                day_result = (
+                    day_f * (1 - side_alpha_3ch) +
+                    side_layer_bgr.astype(np.float32) * side_alpha_3ch
+                ).astype(np.uint8)
+                
+                # 앞면 alpha 블렌딩
+                text_alpha = text_layer_rgba[:, :, 3:4].astype(np.float32) / 255.0
+                text_alpha_3ch = np.repeat(text_alpha, 3, axis=2)
+                day_result = (
+                    day_result.astype(np.float32) * (1 - text_alpha_3ch) +
+                    text_layer_bgr.astype(np.float32) * text_alpha_3ch
+                ).astype(np.uint8)
+            else:
+                # 시안용: 투명 배경이므로 cv2.add 사용 (기존 동작)
+                day_result = cv2.add(day_f.astype(np.uint8), side_layer_bgr)
+                day_result = cv2.add(day_result, text_layer_bgr)
             
             # 맨벽/프레임바는 입체감 추가
             if installation_type == "프레임바":
@@ -1322,7 +1376,7 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
         result = add_3d_depth(result_np, depth=6)
         return result, None
 
-def render_signboard(text: str, logo_path: str, logo_type: str, installation_type: str, sign_type: str, bg_color: str, text_color: str, text_direction: str = "horizontal", font_size: int = 100, text_position_x: int = 50, text_position_y: int = 50, width: int = 1200, height: int = 300) -> tuple:
+def render_signboard(text: str, logo_path: str, logo_type: str, installation_type: str, sign_type: str, bg_color: str, text_color: str, text_direction: str = "horizontal", font_size: int = 100, text_position_x: int = 50, text_position_y: int = 50, width: int = 1200, height: int = 300, use_actual_bg_for_training: bool = False) -> tuple:
     """간판 이미지 생성 - 설치 방식 + 간판 종류
     Returns: (day_image, text_layer) - text_layer는 전광채널만 분리, 나머지는 None
     """
@@ -1340,28 +1394,28 @@ def render_signboard(text: str, logo_path: str, logo_type: str, installation_typ
     # 야간 합성에서만 전광/후광 차이를 둔다.
     if sign_type == "전광채널":
         # 전광채널: 직접 처리 (주간은 그림자+옆면+앞면, 야간은 별도 처리)
-        result, text_layer = render_combined_signboard(installation_type, "전광채널", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height)
+        result, text_layer = render_combined_signboard(installation_type, "전광채널", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height, use_actual_bg_for_training)
         return result, text_layer
     elif sign_type == "후광채널":
-        result, text_layer = render_combined_signboard(installation_type, "후광채널", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height)
+        result, text_layer = render_combined_signboard(installation_type, "후광채널", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height, use_actual_bg_for_training)
         return result, text_layer
     elif sign_type == "전후광채널":
-        result, text_layer = render_combined_signboard(installation_type, "전후광채널", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height)
+        result, text_layer = render_combined_signboard(installation_type, "전후광채널", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height, use_actual_bg_for_training)
         return result, text_layer
     elif sign_type.startswith("스카시"):
         # 스카시_금속, 스카시_아크릴 등 모든 스카시 변형 지원
         print(f"[DEBUG] render_signboard: 스카시 감지, sign_type={sign_type}, render_combined_signboard 호출")
-        result, _ = render_combined_signboard(installation_type, sign_type, text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height)
+        result, _ = render_combined_signboard(installation_type, sign_type, text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height, use_actual_bg_for_training)
         return result, None
     elif sign_type == "플렉스":
-        result, _ = render_combined_signboard(installation_type, "플렉스", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height)
+        result, _ = render_combined_signboard(installation_type, "플렉스", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height, use_actual_bg_for_training)
         return result, None
     elif sign_type == "어닝간판":
-        result, _ = render_combined_signboard(installation_type, "어닝간판", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height)
+        result, _ = render_combined_signboard(installation_type, "어닝간판", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height, use_actual_bg_for_training)
         return result, None
     else:
         # 기본값: 전광채널
-        result, text_layer = render_combined_signboard(installation_type, "전광채널", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height)
+        result, text_layer = render_combined_signboard(installation_type, "전광채널", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height, use_actual_bg_for_training)
         return result, text_layer
 
 def order_points(pts):

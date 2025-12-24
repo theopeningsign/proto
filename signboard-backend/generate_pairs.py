@@ -299,6 +299,7 @@ def generate_phase1_image(
         text_position_y=50,
         width=width,
         height=height,
+        use_actual_bg_for_training=True,  # 학습 데이터용: 실제 배경색 사용
     )
 
     if day_img is None:
