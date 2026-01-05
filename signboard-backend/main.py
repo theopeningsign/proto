@@ -1200,12 +1200,28 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
         
         # 전광채널: lights_enabled=True일 때만 주간에도 전광 glow 효과 적용
         if lights_enabled:
-            # 전광 효과: 텍스트 앞에서 빛나는 효과
-            text_glow = safe_gaussian_blur(text_layer_bgr, (25, 25), 10)
+            # ============ 이미지 크기 기반 동적 전광 조정 ============
+            image_area = width * height
+            
+            # 작은 이미지 (512x512=262,144 이하): pix2pix용 자연스러운 전광
+            if image_area <= 300000:  # 약 548x548 이하
+                # 작은 blur로 자연스러운 전광
+                front_blur_size = (15, 15)
+                front_sigma = 8
+                front_intensity = 0.8  # 낮은 강도
+            else:
+                # 큰 이미지: 기존 설정 유지
+                front_blur_size = (25, 25)
+                front_sigma = 10
+                front_intensity = 0.6
+            # ========================================================
+            
+            # 전광 효과: 텍스트 앞에서 빛나는 효과 (동적 파라미터)
+            text_glow = safe_gaussian_blur(text_layer_bgr, front_blur_size, front_sigma)
             # day_result 크기에 맞춰서 text_glow 리사이즈 (add_3d_depth로 크기가 변경될 수 있음)
             if day_result.shape[:2] != text_glow.shape[:2]:
                 text_glow = cv2.resize(text_glow, (day_result.shape[1], day_result.shape[0]))
-            day_result = cv2.addWeighted(day_result, 1.0, text_glow, 0.6, 0)
+            day_result = cv2.addWeighted(day_result, 1.0, text_glow, front_intensity, 0)
         
         # 야간용 text_layer 반환 (후광채널과 동일)
         return day_result, text_layer_bgr
@@ -1340,18 +1356,34 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
                 
 
                 
-                # 더 넓고 부드러운 blur: 크기 증가, sigma 증가, 3회 적용
-                backlight = safe_gaussian_blur(text_mask, (141, 141), 70)  # (H, W) - 더 넓은 blur
-                backlight = safe_gaussian_blur(backlight, (141, 141), 70)  # 두 번째 blur
-                backlight = safe_gaussian_blur(backlight, (121, 121), 60)  # 세 번째 blur로 더 부드럽게
+                # ============ 이미지 크기 기반 동적 후광 조정 ============
+                image_area = width * height
+                
+                # 작은 이미지 (512x512=262,144 이하): pix2pix용 자연스러운 후광
+                if image_area <= 300000:  # 약 548x548 이하
+                    # 작은 blur로 자연스러운 후광
+                    blur_size1, blur_size2, blur_size3 = (31, 31), (31, 31), (21, 21)
+                    sigma1, sigma2, sigma3 = 15, 15, 10
+                    intensity = 1.8  # 낮은 강도
+                else:
+                    # 큰 이미지: 기존 설정 유지 (웹 간판시안생성기)
+                    blur_size1, blur_size2, blur_size3 = (141, 141), (141, 141), (121, 121)
+                    sigma1, sigma2, sigma3 = 70, 70, 60
+                    intensity = 4.0
+                
+                # 동적 blur 적용
+                backlight = safe_gaussian_blur(text_mask, blur_size1, sigma1)  # 첫 번째 blur
+                backlight = safe_gaussian_blur(backlight, blur_size2, sigma2)  # 두 번째 blur
+                backlight = safe_gaussian_blur(backlight, blur_size3, sigma3)  # 세 번째 blur로 더 부드럽게
+                # ========================================================
                 
                 # 후광 색상: 기본 따뜻한 흰색 LED (대부분 후광채널이 이 색상 사용)
                 glow_color_bgr = np.array([220, 245, 255], dtype=np.float32)  # BGR: 따뜻한 흰색
                 
                 # (H, W) -> (H, W, 3)으로 변환, 따뜻한 흰색 LED 적용
                 backlight_3d = backlight[:, :, np.newaxis]  # (H, W, 1)
-                # 후광 glow: 따뜻한 흰색 LED, 강도 4.0배 (더 강하게)
-                backlight_glow = (backlight_3d * glow_color_bgr[np.newaxis, np.newaxis, :] * 4.0).clip(0, 255).astype(np.float32)
+                # 후광 glow: 동적 강도 적용
+                backlight_glow = (backlight_3d * glow_color_bgr[np.newaxis, np.newaxis, :] * intensity).clip(0, 255).astype(np.float32)
                 
                 # day_result와 크기 확인 및 리사이즈
                 if day_result.shape[:2] != backlight_glow.shape[:2]:
@@ -1374,14 +1406,30 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
             debug_logger.info(f"[전후광채널 glow] 시작: installation_type={installation_type}, day_result.shape={day_result.shape}")
             if installation_type == "전면프레임":
                 # 전면프레임: day_result에서 직접 밝은 부분 추출하여 glow 적용 (크기 문제 해결)
+                # ============ 이미지 크기 기반 동적 전후광 조정 ============
+                image_area = width * height
+                
+                # 작은 이미지 (512x512=262,144 이하): pix2pix용 자연스러운 전후광
+                if image_area <= 300000:  # 약 548x548 이하
+                    # 작은 blur로 자연스러운 전후광
+                    mixed_blur_size = (15, 15)
+                    mixed_sigma = 8
+                    mixed_intensity = 0.4  # 낮은 강도
+                else:
+                    # 큰 이미지: 기존 설정 유지
+                    mixed_blur_size = (25, 25)
+                    mixed_sigma = 10
+                    mixed_intensity = 0.5
+                # ========================================================
+                
                 # day_result에서 텍스트 영역(밝은 부분) 추출
                 gray = cv2.cvtColor(day_result, cv2.COLOR_BGR2GRAY)
                 bright_mask = (gray > 50).astype(np.float32)  # 밝은 부분 마스크
                 bright_mask_3ch = np.stack([bright_mask, bright_mask, bright_mask], axis=2)
                 bright_area = day_result.astype(np.float32) * bright_mask_3ch
-                text_glow = safe_gaussian_blur(bright_area.astype(np.uint8), (25, 25), 10)
+                text_glow = safe_gaussian_blur(bright_area.astype(np.uint8), mixed_blur_size, mixed_sigma)
                 debug_logger.debug(f"전후광채널 전면프레임 glow: bright_mask 픽셀 수={bright_mask.sum()}, text_glow.mean()={text_glow.mean():.2f}")
-                day_result = cv2.addWeighted(day_result, 1.0, text_glow, 0.5, 0)
+                day_result = cv2.addWeighted(day_result, 1.0, text_glow, mixed_intensity, 0)
                 debug_logger.debug(f"전후광채널 전면프레임 glow 완료: day_result.mean()={day_result.mean():.2f}")
             else:
                 # 맨벽/프레임바: 기존 방식 (text_layer_bgr 사용)
@@ -1452,13 +1500,37 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
         result = add_3d_depth(result_f, depth=5)
         return result, None
     
-    elif sign_type == "플렉스":
-        # 플렉스: 천 재질 전체 발광
+    elif sign_type == "플렉스_LED":
+        # LED 플렉스: 강한 내부 발광 (LED 백라이트)
         draw = ImageDraw.Draw(signboard)
         draw.text(position, text_to_render, fill=text_rgb, font=font)
         result_np = cv2.cvtColor(np.array(signboard), cv2.COLOR_RGB2BGR)
+        # LED 백라이트: 더 큰 범위, 더 강한 효과
+        glow = safe_gaussian_blur(result_np, (81, 81), 35)
+        result = cv2.addWeighted(result_np, 0.5, glow, 0.5, 0)
+        
+        # lights_enabled=True일 때 추가 외부 조명 효과
+        if lights_enabled:
+            extra_glow = safe_gaussian_blur(result, (61, 61), 25)
+            result = cv2.addWeighted(result, 0.8, extra_glow, 0.2, 0)
+        
+        result = add_3d_depth(result, depth=6)
+        return result, None
+    
+    elif sign_type in ["플렉스_기본", "플렉스"]:
+        # 기본 플렉스: 부드러운 천 재질 (LED 없음)
+        draw = ImageDraw.Draw(signboard)
+        draw.text(position, text_to_render, fill=text_rgb, font=font)
+        result_np = cv2.cvtColor(np.array(signboard), cv2.COLOR_RGB2BGR)
+        # 기존 방식: 부드러운 glow
         glow = safe_gaussian_blur(result_np, (51, 51), 20)
         result = cv2.addWeighted(result_np, 0.7, glow, 0.3, 0)
+        
+        # lights_enabled=True일 때 외부 조명으로 약간 밝아짐
+        if lights_enabled:
+            bright_glow = safe_gaussian_blur(result, (41, 41), 15)
+            result = cv2.addWeighted(result, 0.9, bright_glow, 0.1, 0)
+        
         result = add_3d_depth(result, depth=6)
         return result, None
     elif sign_type == "어닝간판":
@@ -2043,34 +2115,16 @@ def composite_signboard(
                 # 로고 영역을 50% 주간 밝기로 복원
                 night_result = night_with_logo_restore * (1 - logo_restore_mask) + day_logo * logo_restore_mask
                 night_result = np.clip(night_result, 0, 255).astype(np.uint8)
-        elif sign_type == "플렉스":
-            # 플렉스: 천 영역만 발광, 프레임/그림자는 원본 유지
-            base_image = warped_sign.astype(np.float32)
-            gray = cv2.cvtColor(warped_sign, cv2.COLOR_BGR2GRAY)
+        elif sign_type == "플렉스_LED":
+            # LED 플렉스: 내부 LED 백라이트로 야간에도 밝게 유지
+            # 복잡한 glow 없이 단순하게 원본 밝기 유지
+            night_result = night_base * (1 - combined_mask) + warped_sign.astype(np.float32) * combined_mask
+            night_result = np.clip(night_result, 0, 255).astype(np.uint8)
             
-            # 1. 천 영역 감지: 매우 밝은 부분만 (흰색/밝은 배경)
-            _, cloth_mask = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY)
-            
-            # 2. 간판 영역으로 제한 (combined_mask는 3채널이므로 첫 채널만 사용)
-            combined_mask_1ch = (combined_mask[:, :, 0] * 255).astype(np.uint8)
-            cloth_mask = cv2.bitwise_and(cloth_mask, combined_mask_1ch)
-            
-            # 3. 경계 부드럽게 (작은 blur)
-            cloth_mask = cv2.GaussianBlur(cloth_mask, (5, 5), 1)
-            cloth_mask_3d = (cloth_mask.astype(np.float32) / 255.0)
-            cloth_mask_3ch = np.stack([cloth_mask_3d, cloth_mask_3d, cloth_mask_3d], axis=2)
-            
-            # 4. 천 영역: 70% 발광
-            cloth_glow = base_image * cloth_mask_3ch * 0.7
-            
-            # 5. 프레임/그림자: 원본 유지
-            frame_area = base_image
-            
-            # 6. 간판 합성: 천만 발광, 나머지는 원본
-            night_signboard = frame_area * (1 - cloth_mask_3ch) + cloth_glow * cloth_mask_3ch
-            
-            # 7. 건물 배경과 합성
-            night_result = night_base * (1 - combined_mask) + night_signboard * combined_mask
+        elif sign_type in ["플렉스_기본", "플렉스"]:
+            # 기본 플렉스: LED 없음 → 비조명 간판처럼 야간에 어두워짐
+            glow_intensity = 0.3  # 스카시와 동일하게 어둡게
+            night_result = night_base * (1 - combined_mask) + warped_sign.astype(np.float32) * combined_mask * glow_intensity
             night_result = np.clip(night_result, 0, 255).astype(np.uint8)
         elif sign_type == "스카시" or sign_type.startswith("스카시_"):
             # 비조명: 야간에는 전체를 어둡게(배경과 동일 수준)
