@@ -19,11 +19,18 @@ import sys
 import traceback
 from pathlib import Path
 from datetime import datetime
-from PIL import Image, ImageTk
+from PIL import Image, ImageTk, ImageDraw
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import cv2
 import numpy as np
+
+# OCR 라이브러리 (선택사항)
+try:
+    import pytesseract
+    OCR_AVAILABLE = True
+except ImportError:
+    OCR_AVAILABLE = False
 
 # 디버깅을 위한 간단한 로깅 함수
 def log_error(error_msg, exc_info=None):
@@ -55,11 +62,22 @@ TIME_TYPES = {
     'n': 'night'
 }
 
+# 채널 타입 매핑 (전광/후광)
+CHANNEL_TYPES = {
+    'f': 'front',  # 전광
+    'h': 'back'    # 후광 (h = 후광의 후)
+}
+
 # 타입 한글명
 SIGN_TYPE_NAMES = {
     'channel': '채널',
     'scasi': '스카시',
     'flex': '플렉스'
+}
+
+CHANNEL_TYPE_NAMES = {
+    'front': '전광',
+    'back': '후광'
 }
 
 INSTALLATION_TYPE_NAMES = {
@@ -85,7 +103,20 @@ class LabelingToolGUI:
             output_base: 출력 기본 폴더 (없으면 input_dir의 상위 폴더)
         """
         self.input_dir = Path(input_dir)
-        self.output_base = output_base or self.input_dir.parent
+        # output_base가 없으면 phase2_data로 설정
+        if output_base:
+            self.output_base = Path(output_base)
+        else:
+            # input_dir이 phase2_data 하위에 있으면 phase2_data를 찾음
+            script_dir = Path(__file__).parent
+            phase2_data = script_dir / "phase2_data"
+            # input_dir이 phase2_data 하위에 있는지 확인 (Path 객체로 변환 후 확인)
+            try:
+                self.input_dir.relative_to(phase2_data)
+                self.output_base = phase2_data
+            except ValueError:
+                # phase2_data 하위가 아니면 input_dir.parent 사용
+                self.output_base = self.input_dir.parent
         
         # labels.json 경로
         if labels_file:
@@ -112,8 +143,25 @@ class LabelingToolGUI:
         
         # 선택 상태
         self.selected_sign_type = None
+        self.selected_channel_type = None  # 전광/후광 (채널 선택 시만 사용)
         self.selected_installation_type = None
         self.selected_time_type = None
+        self.selected_lights_enabled = None  # 조명 켜짐/꺼짐 (채널 간판만)
+        
+        # 크롭 관련 상태
+        self.current_image = None  # 원본 PIL Image
+        self.display_image = None  # 표시용 PIL Image (리사이즈됨)
+        self.display_scale = 1.0  # 원본 대비 표시 스케일
+        self.crop_start = None  # 크롭 시작 좌표 (canvas 좌표)
+        self.crop_end = None  # 크롭 종료 좌표 (canvas 좌표)
+        self.crop_rect = None  # Canvas의 사각형 ID
+        self.cropped_photo_path = None  # 크롭된 이미지 경로
+        self.crop_region = None  # 원본 이미지 기준 크롭 영역 (x, y, width, height)
+        self.text_input = ""  # 입력된 텍스트
+        
+        # cropped_photos 디렉토리
+        self.cropped_photos_dir = self.output_base / "cropped_photos"
+        self.cropped_photos_dir.mkdir(parents=True, exist_ok=True)
         
         # GUI 초기화
         self.setup_gui()
@@ -127,14 +175,21 @@ class LabelingToolGUI:
     
     def load_labels(self):
         """labels.json 로드 및 구조 마이그레이션"""
-        # 기본 구조 정의
+        # 기본 구조 정의 (전광/후광 구분)
         default_structure = {
-            "channel_wall": {"day": [], "night": []},
-            "channel_frame_bar": {"day": [], "night": []},
-            "channel_frame_plate": {"day": [], "night": []},
+            # 전광채널
+            "channel_front_wall": {"day": [], "night": []},
+            "channel_front_frame_bar": {"day": [], "night": []},
+            "channel_front_frame_plate": {"day": [], "night": []},
+            # 후광채널
+            "channel_back_wall": {"day": [], "night": []},
+            "channel_back_frame_bar": {"day": [], "night": []},
+            "channel_back_frame_plate": {"day": [], "night": []},
+            # 스카시
             "scasi_wall": {"day": [], "night": []},
             "scasi_frame_bar": {"day": [], "night": []},
             "scasi_frame_plate": {"day": [], "night": []},
+            # 플렉스
             "flex_frame_plate": {"day": [], "night": []}
         }
         
@@ -151,8 +206,12 @@ class LabelingToolGUI:
                     migrated[key] = loaded[key]
             
             # 기존 구조(이전 버전)에서 데이터 마이그레이션 (하위 호환성)
+            # 기존 "channel_wall" 등을 "channel_front_wall"로 마이그레이션 (기본값: 전광)
             old_to_new = {
-                "channel": "channel_wall",  # 기본값으로 wall 사용
+                "channel": "channel_front_wall",  # 기본값으로 전광 wall 사용
+                "channel_wall": "channel_front_wall",
+                "channel_frame_bar": "channel_front_frame_bar",
+                "channel_frame_plate": "channel_front_frame_plate",
                 "scasi": "scasi_wall",
                 "flex": "flex_frame_plate"
             }
@@ -194,29 +253,45 @@ class LabelingToolGUI:
         """GUI 설정"""
         self.root = tk.Tk()
         self.root.title("간판 사진 라벨링 도구")
-        self.root.geometry("1200x800")
+        self.root.geometry("1200x1000")
         self.root.configure(bg='#1e1e1e')
         
-        # 키보드 단축키 바인딩
-        self.root.bind('<Key-1>', lambda e: self.select_sign_type('1'))
-        self.root.bind('<Key-2>', lambda e: self.select_sign_type('2'))
-        self.root.bind('<Key-3>', lambda e: self.select_sign_type('3'))
-        self.root.bind('<Key-w>', lambda e: self.select_installation_type('w'))
-        self.root.bind('<Key-W>', lambda e: self.select_installation_type('w'))
-        self.root.bind('<Key-b>', lambda e: self.select_installation_type('b'))
-        self.root.bind('<Key-B>', lambda e: self.select_installation_type('b'))
-        self.root.bind('<Key-p>', lambda e: self.select_installation_type('p'))
-        self.root.bind('<Key-P>', lambda e: self.select_installation_type('p'))
-        self.root.bind('<Key-d>', lambda e: self.select_time_type('d'))
-        self.root.bind('<Key-D>', lambda e: self.select_time_type('d'))
-        self.root.bind('<Key-n>', lambda e: self.select_time_type('n'))
-        self.root.bind('<Key-N>', lambda e: self.select_time_type('n'))
-        self.root.bind('<Key-s>', lambda e: self.skip_image())
-        self.root.bind('<Key-S>', lambda e: self.skip_image())
-        self.root.bind('<Key-z>', lambda e: self.undo_last())
-        self.root.bind('<Key-Z>', lambda e: self.undo_last())
-        self.root.bind('<Key-q>', lambda e: self.quit_app())
-        self.root.bind('<Key-Q>', lambda e: self.quit_app())
+        # 키보드 단축키 바인딩 (텍스트 입력란에 포커스가 없을 때만 작동)
+        def check_focus_and_call(func, *args):
+            """텍스트 입력란에 포커스가 없을 때만 함수 호출"""
+            focused_widget = self.root.focus_get()
+            # Entry 위젯에 포커스가 있으면 단축키 무시
+            if isinstance(focused_widget, tk.Entry):
+                return
+            return func(*args)
+        
+        self.root.bind('<Key-1>', lambda e: check_focus_and_call(self.select_sign_type, '1'))
+        self.root.bind('<Key-2>', lambda e: check_focus_and_call(self.select_sign_type, '2'))
+        self.root.bind('<Key-3>', lambda e: check_focus_and_call(self.select_sign_type, '3'))
+        self.root.bind('<Key-f>', lambda e: check_focus_and_call(self.select_channel_type, 'f'))
+        self.root.bind('<Key-F>', lambda e: check_focus_and_call(self.select_channel_type, 'f'))
+        self.root.bind('<Key-h>', lambda e: check_focus_and_call(self.select_channel_type, 'h'))  # 후광
+        self.root.bind('<Key-H>', lambda e: check_focus_and_call(self.select_channel_type, 'h'))
+        self.root.bind('<Key-w>', lambda e: check_focus_and_call(self.select_installation_type, 'w'))
+        self.root.bind('<Key-W>', lambda e: check_focus_and_call(self.select_installation_type, 'w'))
+        self.root.bind('<Key-b>', lambda e: check_focus_and_call(self.select_installation_type, 'b'))
+        self.root.bind('<Key-B>', lambda e: check_focus_and_call(self.select_installation_type, 'b'))
+        self.root.bind('<Key-p>', lambda e: check_focus_and_call(self.select_installation_type, 'p'))
+        self.root.bind('<Key-P>', lambda e: check_focus_and_call(self.select_installation_type, 'p'))
+        self.root.bind('<Key-d>', lambda e: check_focus_and_call(self.select_time_type, 'd'))
+        self.root.bind('<Key-D>', lambda e: check_focus_and_call(self.select_time_type, 'd'))
+        self.root.bind('<Key-n>', lambda e: check_focus_and_call(self.select_time_type, 'n'))
+        self.root.bind('<Key-N>', lambda e: check_focus_and_call(self.select_time_type, 'n'))
+        self.root.bind('<Key-o>', lambda e: check_focus_and_call(self.select_lights, 'o'))
+        self.root.bind('<Key-O>', lambda e: check_focus_and_call(self.select_lights, 'o'))
+        self.root.bind('<Key-x>', lambda e: check_focus_and_call(self.select_lights, 'x'))
+        self.root.bind('<Key-X>', lambda e: check_focus_and_call(self.select_lights, 'x'))
+        self.root.bind('<Key-s>', lambda e: check_focus_and_call(self.skip_image))
+        self.root.bind('<Key-S>', lambda e: check_focus_and_call(self.skip_image))
+        self.root.bind('<Key-z>', lambda e: check_focus_and_call(self.undo_last))
+        self.root.bind('<Key-Z>', lambda e: check_focus_and_call(self.undo_last))
+        self.root.bind('<Key-q>', lambda e: check_focus_and_call(self.quit_app))
+        self.root.bind('<Key-Q>', lambda e: check_focus_and_call(self.quit_app))
         self.root.focus_set()
         
         # 메인 프레임
@@ -255,14 +330,35 @@ class LabelingToolGUI:
         center_frame.columnconfigure(0, weight=2)
         center_frame.columnconfigure(1, weight=1)
         
-        # 왼쪽: 이미지 표시
-        image_frame = ttk.LabelFrame(center_frame, text="이미지", padding="10")
+        # 왼쪽: 이미지 표시 (Canvas 사용)
+        image_frame = ttk.LabelFrame(center_frame, text="이미지 (드래그로 간판 영역 선택)", padding="10")
         image_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(0, 10))
         image_frame.columnconfigure(0, weight=1)
         image_frame.rowconfigure(0, weight=1)
         
-        self.image_label = ttk.Label(image_frame, text="이미지 로딩 중...")
-        self.image_label.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        # Canvas 생성
+        canvas_frame = ttk.Frame(image_frame)
+        canvas_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        canvas_frame.columnconfigure(0, weight=1)
+        canvas_frame.rowconfigure(0, weight=1)
+        
+        self.canvas = tk.Canvas(
+            canvas_frame,
+            bg='#1e1e1e',
+            highlightthickness=1,
+            highlightbackground='#555555'
+        )
+        self.canvas.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        
+        # 스크롤바 (필요시)
+        scrollbar_v = ttk.Scrollbar(canvas_frame, orient=tk.VERTICAL, command=self.canvas.yview)
+        scrollbar_h = ttk.Scrollbar(canvas_frame, orient=tk.HORIZONTAL, command=self.canvas.xview)
+        self.canvas.configure(yscrollcommand=scrollbar_v.set, xscrollcommand=scrollbar_h.set)
+        
+        # 마우스 이벤트 바인딩
+        self.canvas.bind("<Button-1>", self.on_crop_start)
+        self.canvas.bind("<B1-Motion>", self.on_crop_drag)
+        self.canvas.bind("<ButtonRelease-1>", self.on_crop_end)
         
         # 파일 정보
         self.file_info_label = ttk.Label(
@@ -272,6 +368,15 @@ class LabelingToolGUI:
             foreground='gray'
         )
         self.file_info_label.grid(row=1, column=0, pady=(10, 0))
+        
+        # 크롭 영역 정보
+        self.crop_info_label = ttk.Label(
+            image_frame,
+            text="마우스로 드래그하여 간판 영역을 선택하세요",
+            font=('맑은 고딕', 9),
+            foreground='#4CAF50'
+        )
+        self.crop_info_label.grid(row=2, column=0, pady=(5, 0))
         
         # 오른쪽: 컨트롤 패널
         control_frame = ttk.LabelFrame(center_frame, text="분류", padding="10")
@@ -307,11 +412,44 @@ class LabelingToolGUI:
             font=('맑은 고딕', 10),
             foreground='#4CAF50'
         )
-        self.selected_type_label.grid(row=2, column=0, columnspan=3, pady=(5, 20))
+        self.selected_type_label.grid(row=2, column=0, columnspan=3, pady=(5, 10))
+        
+        # 채널 타입 선택 (전광/후광) - 채널 선택 시에만 표시
+        channel_type_label = ttk.Label(control_frame, text="채널 타입:", font=('맑은 고딕', 11, 'bold'))
+        channel_type_label.grid(row=3, column=0, columnspan=3, sticky=tk.W, pady=(0, 10))
+        
+        self.channel_type_buttons = {}
+        for i, (key, channel_type) in enumerate(CHANNEL_TYPES.items()):
+            btn = tk.Button(
+                control_frame,
+                text=f"[{key.upper()}] {CHANNEL_TYPE_NAMES[channel_type]}",
+                font=('맑은 고딕', 12),
+                bg='#2d2d2d',
+                fg='white',
+                activebackground='#3d3d3d',
+                activeforeground='white',
+                relief=tk.RAISED,
+                bd=2,
+                padx=20,
+                pady=10,
+                command=lambda k=key: self.select_channel_type(k),
+                state=tk.DISABLED
+            )
+            btn.grid(row=4, column=i, padx=5, pady=5, sticky=(tk.W, tk.E))
+            self.channel_type_buttons[key] = btn
+        
+        # 선택된 채널 타입 표시
+        self.selected_channel_label = ttk.Label(
+            control_frame,
+            text="",
+            font=('맑은 고딕', 10),
+            foreground='#FF9800'
+        )
+        self.selected_channel_label.grid(row=5, column=0, columnspan=3, pady=(5, 20))
         
         # 설치 방법 선택
         install_label = ttk.Label(control_frame, text="설치 방법:", font=('맑은 고딕', 11, 'bold'))
-        install_label.grid(row=3, column=0, columnspan=3, sticky=tk.W, pady=(0, 10))
+        install_label.grid(row=6, column=0, columnspan=3, sticky=tk.W, pady=(0, 10))
         
         self.installation_type_buttons = {}
         for i, (key, install_type) in enumerate(INSTALLATION_TYPES.items()):
@@ -330,7 +468,7 @@ class LabelingToolGUI:
                 command=lambda k=key: self.select_installation_type(k),
                 state=tk.DISABLED
             )
-            btn.grid(row=4, column=i, padx=5, pady=5, sticky=(tk.W, tk.E))
+            btn.grid(row=7, column=i, padx=5, pady=5, sticky=(tk.W, tk.E))
             self.installation_type_buttons[key] = btn
         
         control_frame.columnconfigure(0, weight=1)
@@ -344,11 +482,11 @@ class LabelingToolGUI:
             font=('맑은 고딕', 10),
             foreground='#2196F3'
         )
-        self.selected_install_label.grid(row=5, column=0, columnspan=3, pady=(5, 20))
+        self.selected_install_label.grid(row=8, column=0, columnspan=3, pady=(5, 20))
         
         # 시간대 선택
         time_label = ttk.Label(control_frame, text="시간대:", font=('맑은 고딕', 11, 'bold'))
-        time_label.grid(row=6, column=0, columnspan=3, sticky=tk.W, pady=(0, 10))
+        time_label.grid(row=9, column=0, columnspan=3, sticky=tk.W, pady=(0, 10))
         
         self.time_type_buttons = {}
         for i, (key, time_type) in enumerate(TIME_TYPES.items()):
@@ -367,10 +505,81 @@ class LabelingToolGUI:
                 command=lambda k=key: self.select_time_type(k),
                 state=tk.DISABLED
             )
-            btn.grid(row=7, column=i, padx=5, pady=5, sticky=(tk.W, tk.E))
+            btn.grid(row=10, column=i, padx=5, pady=5, sticky=(tk.W, tk.E))
             self.time_type_buttons[key] = btn
         
-        # 확인 버튼 (타입, 설치방법, 시간 모두 선택 후)
+        # 조명 선택 (채널 간판만)
+        lights_label = ttk.Label(control_frame, text="조명:", font=('맑은 고딕', 11, 'bold'))
+        lights_label.grid(row=11, column=0, columnspan=3, sticky=tk.W, pady=(20, 10))
+        
+        self.lights_buttons = {}
+        lights_options = {
+            'o': True,   # On (켜짐)
+            'x': False   # Off (꺼짐)
+        }
+        lights_names = {
+            True: '켜짐',
+            False: '꺼짐'
+        }
+        for i, (key, lights_value) in enumerate(lights_options.items()):
+            btn = tk.Button(
+                control_frame,
+                text=f"[{key.upper()}] {lights_names[lights_value]}",
+                font=('맑은 고딕', 12),
+                bg='#2d2d2d',
+                fg='white',
+                activebackground='#3d3d3d',
+                activeforeground='white',
+                relief=tk.RAISED,
+                bd=2,
+                padx=30,
+                pady=10,
+                command=lambda k=key: self.select_lights(k),
+                state=tk.DISABLED
+            )
+            btn.grid(row=12, column=i, padx=5, pady=5, sticky=(tk.W, tk.E))
+            self.lights_buttons[key] = btn
+        
+        # 선택된 조명 상태 표시
+        self.selected_lights_label = ttk.Label(
+            control_frame,
+            text="",
+            font=('맑은 고딕', 10),
+            foreground='#9C27B0'
+        )
+        self.selected_lights_label.grid(row=13, column=0, columnspan=3, pady=(5, 20))
+        
+        # 간판 텍스트 입력 섹션
+        text_label = ttk.Label(control_frame, text="간판 텍스트:", font=('맑은 고딕', 11, 'bold'))
+        text_label.grid(row=14, column=0, columnspan=3, sticky=tk.W, pady=(20, 5))
+        
+        text_input_frame = ttk.Frame(control_frame)
+        text_input_frame.grid(row=15, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 5))
+        text_input_frame.columnconfigure(0, weight=1)
+        
+        self.text_entry = ttk.Entry(text_input_frame, font=('맑은 고딕', 11))
+        self.text_entry.grid(row=0, column=0, sticky=(tk.W, tk.E), padx=(0, 5))
+        self.text_entry.bind('<KeyRelease>', self.on_text_changed)
+        
+        # OCR 버튼 (선택사항)
+        self.ocr_button = tk.Button(
+            text_input_frame,
+            text="OCR",
+            font=('맑은 고딕', 9),
+            bg='#2196F3',
+            fg='white',
+            command=self.run_ocr,
+            state=tk.DISABLED if not OCR_AVAILABLE else tk.NORMAL
+        )
+        self.ocr_button.grid(row=0, column=1, padx=5)
+        if not OCR_AVAILABLE:
+            self.ocr_button.configure(
+                text="OCR\n(미설치)",
+                bg='#616161',
+                state=tk.DISABLED
+            )
+        
+        # 확인 버튼 (타입, 채널타입(채널인 경우), 설치방법, 시간 모두 선택 후)
         self.confirm_button = tk.Button(
             control_frame,
             text="✓ 확인 및 저장",
@@ -386,11 +595,11 @@ class LabelingToolGUI:
             command=self.confirm_labeling,
             state=tk.DISABLED
         )
-        self.confirm_button.grid(row=8, column=0, columnspan=3, pady=(20, 10), sticky=(tk.W, tk.E))
+        self.confirm_button.grid(row=16, column=0, columnspan=3, pady=(20, 10), sticky=(tk.W, tk.E))
         
         # 기타 버튼
         other_frame = ttk.Frame(control_frame)
-        other_frame.grid(row=9, column=0, columnspan=3, pady=(10, 0), sticky=(tk.W, tk.E))
+        other_frame.grid(row=17, column=0, columnspan=3, pady=(10, 0), sticky=(tk.W, tk.E))
         
         skip_btn = tk.Button(
             other_frame,
@@ -424,13 +633,13 @@ class LabelingToolGUI:
             fg='white',
             command=self.quit_app
         )
-        quit_btn.grid(row=10, column=0, columnspan=3, pady=(10, 0), sticky=(tk.W, tk.E))
+        quit_btn.grid(row=18, column=0, columnspan=3, pady=(10, 0), sticky=(tk.W, tk.E))
         
         # 하단: 키보드 단축키 안내
         help_frame = ttk.Frame(main_frame)
         help_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=(10, 0))
         
-        help_text = "키보드 단축키: [1] 채널 | [2] 스카시 | [3] 플렉스 | [W] 맨벽 | [B] 프레임바 | [P] 프레임판 | [D] 주간 | [N] 야간 | [S] 건너뛰기 | [Z] 되돌리기 | [Q] 종료"
+        help_text = "키보드 단축키: [1] 채널 | [2] 스카시 | [3] 플렉스 | [F] 전광 | [H] 후광 | [W] 맨벽 | [B] 프레임바 | [P] 프레임판 | [D] 주간 | [N] 야간 | [O] 조명켜짐 | [X] 조명꺼짐 | [S] 건너뛰기 | [Z] 되돌리기 | [Q] 종료 | 마우스 드래그로 간판 영역 선택"
         help_label = ttk.Label(
             help_frame,
             text=help_text,
@@ -472,34 +681,60 @@ class LabelingToolGUI:
             return
         
         try:
-            # 이미지 로드 및 리사이즈
-            img = Image.open(image_path)
-            width, height = img.size
+            # 원본 이미지 로드
+            self.current_image = Image.open(image_path)
+            width, height = self.current_image.size
             file_size = os.path.getsize(image_path) / 1024  # KB
             
-            # 표시 영역에 맞게 리사이즈 (최대 800x600)
-            max_width = 800
-            max_height = 600
+            # Canvas 크기에 맞게 리사이즈 (표시용)
+            canvas_width = self.canvas.winfo_width() if self.canvas.winfo_width() > 1 else 800
+            canvas_height = self.canvas.winfo_height() if self.canvas.winfo_height() > 1 else 600
+            
+            max_width = min(1200, canvas_width - 20)
+            max_height = min(800, canvas_height - 20)
+            
             if width > max_width or height > max_height:
                 scale = min(max_width / width, max_height / height)
                 new_width = int(width * scale)
                 new_height = int(height * scale)
-                img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                self.display_image = self.current_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                self.display_scale = scale
+            else:
+                self.display_image = self.current_image.copy()
+                self.display_scale = 1.0
             
-            # PhotoImage로 변환
-            photo = ImageTk.PhotoImage(img)
-            self.image_label.configure(image=photo, text="")
-            self.image_label.image = photo  # 참조 유지
+            # Canvas에 이미지 표시
+            photo = ImageTk.PhotoImage(self.display_image)
+            self.canvas.delete("all")  # 기존 이미지 제거
+            img_id = self.canvas.create_image(0, 0, anchor=tk.NW, image=photo)
+            self.canvas.image = photo  # 참조 유지
+            # Canvas 크기 업데이트
+            self.canvas.update_idletasks()
+            self.canvas.configure(scrollregion=self.canvas.bbox(img_id))
+            
+            # 크롭 상태 초기화
+            self.crop_start = None
+            self.crop_end = None
+            self.crop_rect = None
+            self.cropped_photo_path = None
+            self.crop_region = None
+            self.text_entry.delete(0, tk.END)
+            self.text_input = ""
             
             # 파일 정보 업데이트
             self.file_info_label.configure(
                 text=f"파일: {image_path.name} | 크기: {width}x{height}px | 용량: {file_size:.1f} KB"
             )
+            self.crop_info_label.configure(
+                text="마우스로 드래그하여 간판 영역을 선택하세요"
+            )
             
             # 선택 상태 초기화
             self.selected_sign_type = None
+            self.selected_channel_type = None
             self.selected_installation_type = None
             self.selected_time_type = None
+            self.selected_lights_enabled = None
             self.update_button_states()
             
             # 진행상황 업데이트
@@ -534,20 +769,57 @@ class LabelingToolGUI:
         else:
             self.selected_type_label.configure(text="")
         
+        # 채널 타입 버튼 활성화/비활성화 (채널 선택 시에만)
+        is_channel = self.selected_sign_type == '1'
+        if is_channel:
+            for btn in self.channel_type_buttons.values():
+                btn.configure(state=tk.NORMAL)
+        else:
+            for btn in self.channel_type_buttons.values():
+                btn.configure(state=tk.DISABLED)
+        
+        # 채널 타입 버튼 색상
+        for key, btn in self.channel_type_buttons.items():
+            if self.selected_channel_type == key:
+                btn.configure(bg='#FF9800', fg='white')
+            else:
+                btn.configure(bg='#2d2d2d', fg='white')
+        
+        # 선택된 채널 타입 표시
+        if self.selected_channel_type:
+            channel_type = CHANNEL_TYPES[self.selected_channel_type]
+            self.selected_channel_label.configure(
+                text=f"채널: {CHANNEL_TYPE_NAMES[channel_type]}"
+            )
+        else:
+            self.selected_channel_label.configure(text="")
+        
         # 플렉스인지 확인
         is_flex = self.selected_sign_type == '3'
         
         # 설치 방법 버튼 활성화/비활성화
+        # 채널인 경우: 전광/후광 선택 후에만 활성화
+        # 스카시/플렉스인 경우: 간판 타입 선택 후 바로 활성화
         if self.selected_sign_type:
-            for key, btn in self.installation_type_buttons.items():
-                if is_flex:
-                    # 플렉스는 frame_plate만 가능
-                    if key == 'p':
-                        btn.configure(state=tk.NORMAL, bg='#4CAF50', fg='white')
+            if is_channel:
+                # 채널인 경우 전광/후광 선택 필요
+                can_select_install = self.selected_channel_type is not None
+            else:
+                # 스카시/플렉스는 바로 활성화
+                can_select_install = True
+            if can_select_install:
+                for key, btn in self.installation_type_buttons.items():
+                    if is_flex:
+                        # 플렉스는 frame_plate만 가능
+                        if key == 'p':
+                            btn.configure(state=tk.NORMAL, bg='#4CAF50', fg='white')
+                        else:
+                            btn.configure(state=tk.DISABLED, bg='#2d2d2d', fg='white')
                     else:
-                        btn.configure(state=tk.DISABLED, bg='#2d2d2d', fg='white')
-                else:
-                    btn.configure(state=tk.NORMAL)
+                        btn.configure(state=tk.NORMAL)
+            else:
+                for btn in self.installation_type_buttons.values():
+                    btn.configure(state=tk.DISABLED)
         else:
             for btn in self.installation_type_buttons.values():
                 btn.configure(state=tk.DISABLED)
@@ -574,7 +846,15 @@ class LabelingToolGUI:
             self.selected_install_label.configure(text="")
         
         # 시간대 버튼 활성화/비활성화
+        # 채널인 경우: 전광/후광도 선택되어야 함
+        can_select_time = False
         if self.selected_sign_type and self.selected_installation_type:
+            if is_channel:
+                can_select_time = self.selected_channel_type is not None
+            else:
+                can_select_time = True
+        
+        if can_select_time:
             for btn in self.time_type_buttons.values():
                 btn.configure(state=tk.NORMAL)
         else:
@@ -588,8 +868,40 @@ class LabelingToolGUI:
             else:
                 btn.configure(bg='#2d2d2d', fg='white')
         
+        # 조명 버튼 활성화/비활성화 (채널 간판만)
+        if is_channel and self.selected_time_type:
+            for btn in self.lights_buttons.values():
+                btn.configure(state=tk.NORMAL)
+        else:
+            for btn in self.lights_buttons.values():
+                btn.configure(state=tk.DISABLED)
+        
+        # 조명 버튼 색상
+        for key, btn in self.lights_buttons.items():
+            if self.selected_lights_enabled == key:
+                btn.configure(bg='#9C27B0', fg='white')
+            else:
+                btn.configure(bg='#2d2d2d', fg='white')
+        
+        # 선택된 조명 상태 표시
+        if self.selected_lights_enabled:
+            lights_value = True if self.selected_lights_enabled == 'o' else False
+            lights_text = '켜짐' if lights_value else '꺼짐'
+            self.selected_lights_label.configure(text=f"조명: {lights_text}")
+        else:
+            self.selected_lights_label.configure(text="")
+        
         # 확인 버튼 활성화/비활성화
+        # 채널인 경우: 전광/후광도 선택되어야 함
+        # 조명 선택은 선택사항 (없으면 False로 저장)
+        can_confirm = False
         if self.selected_sign_type and self.selected_installation_type and self.selected_time_type:
+            if is_channel:
+                can_confirm = self.selected_channel_type is not None
+            else:
+                can_confirm = True
+        
+        if can_confirm:
             self.confirm_button.configure(state=tk.NORMAL, bg='#4CAF50')
         else:
             self.confirm_button.configure(state=tk.DISABLED, bg='#616161')
@@ -597,12 +909,24 @@ class LabelingToolGUI:
     def select_sign_type(self, key):
         """간판 타입 선택"""
         self.selected_sign_type = key
+        # 채널 타입 초기화 (채널이 아닌 경우 또는 채널 재선택 시)
+        if key != '1':
+            self.selected_channel_type = None
         # 플렉스가 아닌 경우 설치 방법 초기화
         if key != '3':
             self.selected_installation_type = None
         else:
             # 플렉스는 자동으로 frame_plate
             self.selected_installation_type = 'p'
+        self.selected_time_type = None  # 시간대 초기화
+        self.update_button_states()
+    
+    def select_channel_type(self, key):
+        """채널 타입 선택 (전광/후광)"""
+        if not self.selected_sign_type or self.selected_sign_type != '1':
+            return
+        self.selected_channel_type = key
+        self.selected_installation_type = None  # 설치 방법 초기화
         self.selected_time_type = None  # 시간대 초기화
         self.update_button_states()
     
@@ -624,26 +948,59 @@ class LabelingToolGUI:
         self.selected_time_type = key
         self.update_button_states()
     
+    def select_lights(self, key):
+        """조명 선택 (채널 간판만)"""
+        if not self.selected_sign_type or self.selected_sign_type != '1':
+            return
+        if not self.selected_time_type:
+            return
+        self.selected_lights_enabled = key
+        self.update_button_states()
+    
     def confirm_labeling(self):
         """라벨링 확인 및 저장"""
         if not self.selected_sign_type or not self.selected_installation_type or not self.selected_time_type:
             return
         
+        # 채널인 경우 전광/후광 확인
+        if self.selected_sign_type == '1' and not self.selected_channel_type:
+            return
+        
+        # 크롭 영역이 없으면 경고
+        if not self.crop_region:
+            if not messagebox.askyesno("확인", "크롭 영역이 선택되지 않았습니다. 계속하시겠습니까?"):
+                return
+        
         sign_type = SIGN_TYPES[self.selected_sign_type]
         installation_type = INSTALLATION_TYPES[self.selected_installation_type]
         time_type = TIME_TYPES[self.selected_time_type]
         
-        # 조합 키 생성 (예: "channel_wall")
-        sign_type_key = f"{sign_type}_{installation_type}"
+        # 조합 키 생성
+        # 채널인 경우: "channel_front_wall" 또는 "channel_back_wall"
+        # 스카시/플렉스인 경우: "scasi_wall" 또는 "flex_frame_plate"
+        if sign_type == 'channel':
+            channel_type = CHANNEL_TYPES[self.selected_channel_type]
+            sign_type_key = f"{sign_type}_{channel_type}_{installation_type}"
+        else:
+            sign_type_key = f"{sign_type}_{installation_type}"
         
         image_path = self.image_files[self.current_index]
         
         try:
-            # 파일 이동
-            dest_file = self.move_file(image_path, sign_type, installation_type, time_type)
+            # 크롭 실행 (크롭 영역이 있는 경우) - sign_type_key와 time_type 전달
+            if self.crop_region:
+                self.save_cropped_image(image_path, sign_type_key, time_type)
+            
+            # 파일 이동 (sign_type_key 사용)
+            dest_file = self.move_file(image_path, sign_type_key, time_type)
+            
+            # 조명 상태 결정 (채널 간판만, 선택 안 하면 False)
+            lights_enabled = False
+            if sign_type == 'channel' and self.selected_lights_enabled:
+                lights_enabled = (self.selected_lights_enabled == 'o')
             
             # labels.json에 추가
-            self.add_to_labels(dest_file, sign_type_key, time_type, image_path)
+            self.add_to_labels(dest_file, sign_type_key, time_type, image_path, lights_enabled)
             
             # labels.json 저장 (매번 저장하여 안전성 확보)
             self.save_labels()
@@ -768,9 +1125,9 @@ class LabelingToolGUI:
             text=f"라벨링: {self.stats['labeled']} | 건너뛰기: {self.stats['skipped']}"
         )
     
-    def move_file(self, source, sign_type, installation_type, time_type):
+    def move_file(self, source, sign_type_key, time_type):
         """파일을 해당 폴더로 이동"""
-        print(f"[DEBUG] move_file 호출: source={source}, sign_type={sign_type}, installation_type={installation_type}, time_type={time_type}", file=sys.stderr)
+        print(f"[DEBUG] move_file 호출: source={source}, sign_type_key={sign_type_key}, time_type={time_type}", file=sys.stderr)
         
         # 소스 파일 존재 확인
         if not source.exists():
@@ -778,8 +1135,7 @@ class LabelingToolGUI:
             print(f"[ERROR] {error_msg}", file=sys.stderr)
             raise FileNotFoundError(error_msg)
         
-        # 조합 키 생성 (예: "channel_wall")
-        sign_type_key = f"{sign_type}_{installation_type}"
+        # sign_type_key를 사용하여 폴더 경로 생성 (예: "channel_front_wall")
         dest_dir = self.output_base / "real_photos" / sign_type_key / time_type
         print(f"[DEBUG] 대상 디렉토리: {dest_dir}", file=sys.stderr)
         print(f"[DEBUG] output_base: {self.output_base}", file=sys.stderr)
@@ -794,6 +1150,12 @@ class LabelingToolGUI:
         
         base_name = source.stem
         ext = source.suffix
+
+        # ✅ 수정: 파일명에서 기존 prefix 제거 (중복 방지)
+        # 예: "flex_frame_plate_27" → "27"
+        if base_name.startswith(sign_type_key + "_"):
+            base_name = base_name[len(sign_type_key) + 1:]
+
         dest_file = dest_dir / f"{sign_type_key}_{base_name}_{time_type}{ext}"
         print(f"[DEBUG] 대상 파일: {dest_file}", file=sys.stderr)
         
@@ -818,7 +1180,7 @@ class LabelingToolGUI:
         
         return dest_file
     
-    def add_to_labels(self, image_path, sign_type_key, time_type, original_path):
+    def add_to_labels(self, image_path, sign_type_key, time_type, original_path, lights_enabled=False):
         """labels.json에 추가"""
         # 키가 없으면 생성 (안전장치)
         if sign_type_key not in self.labels:
@@ -847,7 +1209,182 @@ class LabelingToolGUI:
             "original_filename": original_path.name
         }
         
+        # 채널 간판인 경우에만 lights_enabled 추가
+        if sign_type == 'channel':
+            entry["lights_enabled"] = lights_enabled
+        
+        # 크롭된 이미지 경로 추가 (있는 경우)
+        if self.cropped_photo_path:
+            # ✅ 수정: output_base 기준 상대 경로로 저장
+            try:
+                rel_path = self.cropped_photo_path.relative_to(self.output_base)
+                entry["cropped_photo"] = str(rel_path).replace('\\', '/')
+            except ValueError:
+                # relative_to 실패하면 파일명만 사용
+                entry["cropped_photo"] = f"cropped_photos/{self.cropped_photo_path.name}"
+                
+        # 텍스트 추가 (있는 경우)
+        if self.text_input:
+            entry["text"] = self.text_input
+        
+        # 크롭 영역 정보 추가 (있는 경우)
+        if self.crop_region:
+            entry["crop_region"] = {
+                "x": int(self.crop_region[0]),
+                "y": int(self.crop_region[1]),
+                "width": int(self.crop_region[2]),
+                "height": int(self.crop_region[3])
+            }
+        
         self.labels[sign_type_key][time_type].append(entry)
+    
+    def on_crop_start(self, event):
+        """크롭 시작"""
+        self.crop_start = (event.x, event.y)
+        if self.crop_rect:
+            self.canvas.delete(self.crop_rect)
+        self.crop_rect = None
+    
+    def on_crop_drag(self, event):
+        """크롭 드래그 중"""
+        if not self.crop_start:
+            return
+        
+        if self.crop_rect:
+            self.canvas.delete(self.crop_rect)
+        
+        x1, y1 = self.crop_start
+        x2, y2 = event.x, event.y
+        
+        # 사각형 그리기
+        self.crop_rect = self.canvas.create_rectangle(
+            x1, y1, x2, y2,
+            outline='#4CAF50',
+            width=2,
+            fill='',
+            stipple='gray50'
+        )
+    
+    def on_crop_end(self, event):
+        """크롭 종료"""
+        if not self.crop_start:
+            return
+        
+        self.crop_end = (event.x, event.y)
+        
+        # 원본 이미지 기준 좌표로 변환
+        x1, y1 = self.crop_start
+        x2, y2 = self.crop_end
+        
+        # 좌표 정규화 (시작점이 끝점보다 클 수 있음)
+        x_min = min(x1, x2)
+        x_max = max(x1, x2)
+        y_min = min(y1, y2)
+        y_max = max(y1, y2)
+        
+        # 표시 스케일로 나눠서 원본 좌표로 변환
+        orig_x = int(x_min / self.display_scale)
+        orig_y = int(y_min / self.display_scale)
+        orig_w = int((x_max - x_min) / self.display_scale)
+        orig_h = int((y_max - y_min) / self.display_scale)
+        
+        # 원본 이미지 범위 내로 제한
+        orig_width, orig_height = self.current_image.size
+        orig_x = max(0, min(orig_x, orig_width - 1))
+        orig_y = max(0, min(orig_y, orig_height - 1))
+        orig_w = max(1, min(orig_w, orig_width - orig_x))
+        orig_h = max(1, min(orig_h, orig_height - orig_y))
+        
+        self.crop_region = (orig_x, orig_y, orig_w, orig_h)
+        
+        # 정보 표시
+        self.crop_info_label.configure(
+            text=f"크롭 영역: ({orig_x}, {orig_y}) 크기: {orig_w}x{orig_h}px"
+        )
+    
+    def save_cropped_image(self, original_path, sign_type_key, time_type):
+        """크롭된 이미지를 저장 (512x512로 리사이즈, 비율 유지 + 패딩)
+        
+        Args:
+            original_path: 원본 이미지 경로
+            sign_type_key: 간판 타입 키 (예: "channel_front_wall")
+            time_type: 시간대 ("day" 또는 "night")
+        """
+        if not self.crop_region or not self.current_image:
+            return
+        
+        x, y, w, h = self.crop_region
+        
+        # 원본 이미지에서 크롭
+        cropped = self.current_image.crop((x, y, x + w, y + h))
+        
+        # 512x512로 리사이즈 (비율 유지)
+        target_size = 512
+        cropped.thumbnail((target_size, target_size), Image.Resampling.LANCZOS)
+        
+        # 패딩을 추가하여 정사각형 만들기
+        padded = Image.new('RGB', (target_size, target_size), (255, 255, 255))
+        paste_x = (target_size - cropped.width) // 2
+        paste_y = (target_size - cropped.height) // 2
+        padded.paste(cropped, (paste_x, paste_y))
+        
+        # 저장 경로 생성: {sign_type_key}_{time_type}_{original_stem}_cropped.jpg
+        original_stem = original_path.stem
+        # 파일명에서 기존 prefix 제거 (중복 방지)
+        if original_stem.startswith(sign_type_key + "_"):
+            original_stem = original_stem[len(sign_type_key) + 1:]
+        if original_stem.endswith(f"_{time_type}"):
+            original_stem = original_stem[:-len(f"_{time_type}")]
+        
+        # 파일명 생성: sign_type_key_time_type_original_stem_cropped.jpg
+        cropped_filename = f"{sign_type_key}_{time_type}_{original_stem}_cropped.jpg"
+        self.cropped_photo_path = self.cropped_photos_dir / cropped_filename
+        
+        # 중복 파일 처리
+        counter = 1
+        while self.cropped_photo_path.exists():
+            cropped_filename = f"{sign_type_key}_{time_type}_{original_stem}_cropped_{counter}.jpg"
+            self.cropped_photo_path = self.cropped_photos_dir / cropped_filename
+            counter += 1
+            if counter > 10000:  # 무한 루프 방지
+                raise RuntimeError(f"중복 파일명 해결 실패: {self.cropped_photos_dir}")
+        
+        # 저장
+        padded.save(self.cropped_photo_path, 'JPEG', quality=95)
+    
+    def on_text_changed(self, event):
+        """텍스트 입력 변경"""
+        self.text_input = self.text_entry.get()
+    
+    def run_ocr(self):
+        """OCR 실행 (크롭된 영역이 있는 경우)"""
+        if not OCR_AVAILABLE:
+            messagebox.showwarning("OCR 미설치", "pytesseract가 설치되어 있지 않습니다.\n\n설치 방법:\npip install pytesseract\n\n그리고 Tesseract OCR을 설치하세요:\nhttps://github.com/tesseract-ocr/tesseract")
+            return
+        
+        if not self.crop_region or not self.current_image:
+            messagebox.showwarning("경고", "먼저 간판 영역을 선택하세요.")
+            return
+        
+        try:
+            x, y, w, h = self.crop_region
+            cropped_img = self.current_image.crop((x, y, x + w, y + h))
+            
+            # OCR 실행 (한글 + 영어)
+            text = pytesseract.image_to_string(cropped_img, lang='kor+eng')
+            text = text.strip()
+            
+            if text:
+                self.text_entry.delete(0, tk.END)
+                self.text_entry.insert(0, text)
+                self.text_input = text
+                self.crop_info_label.configure(
+                    text=f"OCR 결과: {text[:30]}{'...' if len(text) > 30 else ''}"
+                )
+            else:
+                messagebox.showinfo("OCR 결과", "텍스트를 인식하지 못했습니다.")
+        except Exception as e:
+            messagebox.showerror("OCR 오류", f"OCR 실행 중 오류가 발생했습니다:\n{e}")
     
     def quit_app(self):
         """종료 및 저장"""

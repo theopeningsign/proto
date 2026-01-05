@@ -46,9 +46,11 @@ class PairGeneratorGUI:
         
         # 데이터 경로
         self.script_dir = Path(__file__).parent
-        self.labels_path = self.script_dir / "phase2_data" / "labels.json"
-        self.real_photos_root = self.script_dir / "phase2_data" / "real_photos"
-        self.output_root = self.script_dir / "phase2_data" / "paired_data"
+        self.phase2_data = self.script_dir / "phase2_data"
+        self.labels_path = self.phase2_data / "labels.json"
+        self.real_photos_root = self.phase2_data / "real_photos"
+        self.cropped_photos_root = self.phase2_data / "cropped_photos"
+        self.output_root = self.phase2_data / "paired_data"
         
         # 상태 변수
         self.samples: List[Dict] = []
@@ -262,6 +264,14 @@ class PairGeneratorGUI:
         self.text_color_button = tk.Button(text_frame, text="🎨", command=lambda: self.choose_color('text'), width=3)
         self.text_color_button.pack(side='left', padx=5)
         
+        # 조명 상태 (채널 간판만)
+        lights_frame = ttk.Frame(color_frame)
+        lights_frame.pack(fill='x', pady=5)
+        ttk.Label(lights_frame, text="조명:", font=('맑은 고딕', 10)).pack(side='left', padx=5)
+        self.lights_enabled_var = tk.BooleanVar(value=False)
+        lights_check = ttk.Checkbutton(lights_frame, text="조명 켜짐", variable=self.lights_enabled_var)
+        lights_check.pack(side='left', padx=5)
+        
         # 버튼
         button_frame = ttk.Frame(self.tab3)
         button_frame.pack(fill='x', padx=10, pady=10)
@@ -290,9 +300,8 @@ class PairGeneratorGUI:
             return str(target_path.relative_to(base_path))
         except ValueError:
             # base에 포함되지 않으면 phase2_data 기준으로
-            phase2_data = self.script_dir / "phase2_data"
             try:
-                rel_path = str(target_path.relative_to(phase2_data))
+                rel_path = str(target_path.relative_to(self.phase2_data))
                 # real_photos가 이미 포함되어 있으면 그대로 반환
                 if rel_path.startswith('real_photos'):
                     return rel_path
@@ -301,7 +310,7 @@ class PairGeneratorGUI:
             except ValueError:
                 # 그것도 안되면 절대 경로에서 phase2_data 이후 부분 추출
                 target_str = str(target_path)
-                phase2_str = str(phase2_data)
+                phase2_str = str(self.phase2_data)
                 if phase2_str in target_str:
                     idx = target_str.index(phase2_str) + len(phase2_str)
                     rel = target_str[idx:].lstrip('\\/')
@@ -332,7 +341,7 @@ class PairGeneratorGUI:
             self.output_path_var.set(path)
     
     def load_samples(self):
-        """labels.json 로드"""
+        """labels.json 로드 및 실제 파일 존재 여부 확인"""
         labels_path = Path(self.labels_path_var.get())
         
         if not labels_path.exists():
@@ -346,10 +355,68 @@ class PairGeneratorGUI:
                 return
         
         try:
-            self.samples = load_labels(labels_path)
+            all_samples = load_labels(labels_path)
+         
+            # ============ 추가: 중첩 구조 평탄화 ============
+            if isinstance(all_samples, dict):
+                flat_samples = []
+                for sign_type_key, times_dict in all_samples.items():
+                    if isinstance(times_dict, dict):
+                        for time_key, samples_list in times_dict.items():
+                            if isinstance(samples_list, list):
+                                flat_samples.extend(samples_list)
+                all_samples = flat_samples
+            # ============================================
             self.labels_path = labels_path
-            self.sample_info_label.config(text=f"✓ {len(self.samples)}개 샘플 로드 완료")
-            self.log(f"{len(self.samples)}개 샘플 로드 완료")
+
+            # 실제 파일이 존재하는 샘플만 필터링
+            real_photos_dir = self.real_photos_root
+            valid_samples = []
+            
+            for sample in all_samples:
+                real_rel = sample.get("real_photo")
+                if not real_rel:
+                    continue
+                
+                # 경로 해석 (generate_single_pair와 동일한 로직)
+                real_rel_str = str(real_rel).replace('\\', '/')
+                if real_rel_str.startswith('real_photos'):
+                    #============ 수정: "real_photos/" 중복 제거 ============
+                    rel_without_prefix = '/'.join(Path(real_rel_str).parts[1:])
+                    real_path = (real_photos_dir / rel_without_prefix).resolve()
+                    #===================================================
+                    
+                else:
+                    labels_parent = labels_path.parent
+                    real_path = (labels_parent / real_rel).resolve()
+                
+                # 파일이 없으면 대체 경로 시도
+                if not real_path.exists():
+                    if real_rel_str.startswith('real_photos'):
+                        parts = Path(real_rel).parts
+                        if 'real_photos' in parts:
+                            idx = list(parts).index('real_photos')
+                            rel_part = Path(*parts[idx+1:])
+                            real_path = (real_photos_dir / "real_photos" / rel_part).resolve()
+                        else:
+                            real_path = (real_photos_dir / "real_photos" / real_rel).resolve()
+                    else:
+                        filename = Path(real_rel).name
+                        found_files = list(real_photos_dir.rglob(filename))
+                        if found_files:
+                            real_path = found_files[0].resolve()
+                
+                if real_path.exists():
+                    valid_samples.append(sample)
+            
+            self.samples = valid_samples
+            filtered_count = len(all_samples) - len(valid_samples)
+            if filtered_count > 0:
+                self.sample_info_label.config(text=f"✓ {len(self.samples)}개 샘플 로드 완료 (파일 없음 {filtered_count}개 제외)")
+                self.log(f"{len(all_samples)}개 샘플 중 {len(self.samples)}개 유효 (파일 없음 {filtered_count}개 제외)")
+            else:
+                self.sample_info_label.config(text=f"✓ {len(self.samples)}개 샘플 로드 완료")
+                self.log(f"{len(self.samples)}개 샘플 로드 완료")
         except Exception as e:
             messagebox.showerror("오류", f"labels.json 로드 실패: {e}")
             self.log(f"로드 실패: {e}", "ERROR")
@@ -447,119 +514,159 @@ class PairGeneratorGUI:
         pair_id_str = f"{pair_id:04d}"
         sign_type_key = sample.get("sign_type_key") or sample.get("sign_type")
         time_key = sample.get("time", "day")
-        real_rel = sample.get("real_photo")
-        
+    
+        # ==================== 수정 1: 텍스트 읽기 ====================
+        text = sample.get("text", "간판")
+    
+        # ==================== 수정 2: cropped_photo 우선 사용 ====================
+        cropped_rel = sample.get("cropped_photo")
+        real_rel = cropped_rel if cropped_rel else sample.get("real_photo")
+        is_cropped = cropped_rel is not None
+    
         if not real_rel:
-            self.log(f"[{pair_id_str}] real_photo 없음, 스킵", "WARN")
+            self.log(f"[{pair_id_str}] 사진 경로 없음, 스킵", "WARN")
             return
-        
-        # 경로 해석: real_rel이 이미 real_photos로 시작하는지 확인
-        real_rel_str = str(real_rel).replace('\\', '/')  # Windows 경로 정규화
+    
+        # 경로 해석
+        real_rel_str = str(real_rel).replace('\\', '/')
         labels_parent = self.labels_path.parent
-        phase2_data = self.script_dir / "phase2_data"
-        real_photos_dir = phase2_data / "real_photos"
-        
-        # 실제 파일 구조: phase2_data/real_photos/real_photos/...
-        # real_rel이 real_photos로 시작하면, phase2_data/real_photos/real_photos/... 형태로 경로 생성
-        if real_rel_str.startswith('real_photos'):
-            # real_photos/real_photos/... 형태로 경로 생성
-            # Windows 경로 구분자를 처리하기 위해 Path 객체로 변환
-            real_rel_path = Path(real_rel)  # Windows 경로도 자동 처리됨
-            real_path = (real_photos_dir / real_rel_path).resolve()
+    
+    
+        # ==================== 수정 3: cropped_photos 폴더 처리 ====================
+        if is_cropped:
+            # cropped_photos 폴더에서 찾기
+            cropped_photos_dir = self.cropped_photos_root
+
+            if real_rel_str.startswith('cropped_photos'):
+                #============ 수정: "cropped_photos/" 중복 제거 ============
+                rel_without_prefix = '/'.join(Path(real_rel_str).parts[1:])
+                real_path = (cropped_photos_dir / rel_without_prefix).resolve()
+                # ========================================================
+                
+            else:
+                real_path = (cropped_photos_dir / Path(real_rel).name).resolve()
         else:
-            # real_photos 없이 시작하는 경우 (상대 경로)
-            # labels_path.parent 기준으로 경로 생성
-            real_path = (labels_parent / real_rel).resolve()
-        
+            # real_photos 폴더에서 찾기 (기존 로직)
+            real_photos_dir = self.real_photos_root
+            if real_rel_str.startswith('real_photos'):
+                #============ 수정: "real_photos/" 중복 제거 ============
+                rel_without_prefix = '/'.join(Path(real_rel_str).parts[1:])
+                real_path = (real_photos_dir / rel_without_prefix).resolve()
+                #===================================================
+               
+            else:
+                real_path = (labels_parent / real_rel).resolve()
+    
         # 파일이 없으면 대체 경로 시도
         if not real_path.exists():
-            # phase2_data/real_photos/real_photos에서 직접 찾기
-            if real_rel_str.startswith('real_photos'):
+            if is_cropped:
+                # cropped_photos 폴더에서 파일명으로 검색
+                cropped_photos_dir = self.cropped_photos_root
+                filename = Path(real_rel).name
+                found_files = list(cropped_photos_dir.glob(filename))
+                if found_files:
+                    real_path = found_files[0].resolve()
+            elif real_rel_str.startswith('real_photos'):
                 # real_photos 이후 부분 추출
                 parts = Path(real_rel).parts
                 if 'real_photos' in parts:
                     idx = list(parts).index('real_photos')
-                    rel_part = Path(*parts[idx+1:])  # real_photos 이후 부분
-                    real_path = (real_photos_dir / "real_photos" / rel_part).resolve()
+                    rel_part = Path(*parts[idx+1:])
+                    real_path = (real_photos_dir / rel_part).resolve()
                 else:
-                    # real_photos가 없으면 그냥 real_photos/real_photos/real_rel
-                    real_path = (real_photos_dir / "real_photos" / real_rel).resolve()
+                    real_path = (real_photos_dir / real_rel).resolve()
             else:
                 # 파일명으로 검색
                 filename = Path(real_rel).name
                 found_files = list(real_photos_dir.rglob(filename))
                 if found_files:
                     real_path = found_files[0].resolve()
-            
-            if not real_path.exists():
-                self.log(f"[{pair_id_str}] 실제 사진 없음: {real_path} (원본 경로: {real_rel})", "WARN")
-                return
         
+            if not real_path.exists():
+                self.log(f"[{pair_id_str}] 사진 없음: {real_path} (원본: {real_rel})", "WARN")
+                return
+    
         # 진행률 업데이트
         progress = (pair_id / len(self.samples)) * 100
         self.root.after(0, lambda: self.progress_var.set(progress))
         self.root.after(0, lambda: self.progress_label.config(text=f"진행: {pair_id}/{len(self.samples)} ({progress:.1f}%) - {real_path.name}"))
-        
+    
         self.log(f"[{subset.upper()}] [{pair_id_str}] {real_path.name}")
-        
+    
         # 실제 이미지 로드
         real_img = cv2.imread(str(real_path))
         if real_img is None:
-            self.log(f"  실제 사진 로드 실패, 스킵", "WARN")
+            self.log(f"  사진 로드 실패, 스킵", "WARN")
             return
-        
+    
         # 색상 추출
         try:
             if self.use_v2_extractor:
                 bg_hex, text_hex = extract_colors_v2(real_path)
             else:
                 bg_hex, text_hex = extract_colors(real_path)
-            self.log(f"  색상: bg={bg_hex}, text={text_hex}")
+            # ==================== 수정 4: 로그에 텍스트 추가 ====================
+            self.log(f"  텍스트: '{text}', 색상: bg={bg_hex}, text={text_hex}")
         except Exception as e:
             self.log(f"  색상 추출 실패, 기본값 사용: {e}", "WARN")
             bg_hex, text_hex = "#6b2d8f", "#ffffff"
-        
+    
         # Phase1 생성
         try:
+            # labels.json에서 조명 상태 읽기
+            lights_enabled = sample.get("lights_enabled", False)
+            if isinstance(lights_enabled, str):
+                lights_enabled = lights_enabled.lower() in ("true", "1", "yes", "on")
+        
+            # ==================== 수정 5: 실제 텍스트 사용 (핵심!) ====================
             phase1_img = generate_phase1_image(
-                text="간판",
+                text=text,  # ← "간판" → 실제 텍스트
                 sign_type_key=sign_type_key,
                 bg_color=bg_hex,
                 text_color=text_hex,
                 width=512,
                 height=512,
+                lights_enabled=lights_enabled,
             )
         except Exception as e:
             self.log(f"  Phase1 생성 실패, 스킵: {e}", "ERROR")
             return
-        
-        # 전처리
-        real_cropped = center_crop_and_resize(real_img, size=512)
+    
+        # ==================== 수정 6: cropped 이미지는 크롭 스킵 ====================
+        if is_cropped:
+            # 이미 512x512로 크롭된 이미지면 그대로 사용
+            real_cropped = real_img
+        else:
+            # 원본이면 크롭
+            real_cropped = center_crop_and_resize(real_img, size=512)
+    
         phase1_cropped = center_crop_and_resize(phase1_img, size=512)
-        
+    
         # 저장
         subset_dir = output_root / subset
         input_path = subset_dir / "input" / f"{pair_id_str}.png"
         target_path = subset_dir / "target" / f"{pair_id_str}.jpg"
-        
+    
         cv2.imwrite(str(input_path), phase1_cropped)
         cv2.imwrite(str(target_path), real_cropped)
-        
+    
         self.log(f"  저장: {input_path.name}, {target_path.name}")
-        
-        # 메타데이터 기록
+    
+        # ==================== 수정 7: 메타데이터에 텍스트/크롭 여부 추가 ====================
         metadata[pair_id_str] = {
             "sign_type_key": sign_type_key,
             "sign_type": sample.get("sign_type"),
             "installation_type": sample.get("installation_type"),
             "time": time_key,
+            "text": text,  # ← 추가
             "bg_color": bg_hex,
             "text_color": text_hex,
             "real_photo": self._get_relative_path(real_path, self.labels_path.parent),
             "phase1_input": str(input_path.relative_to(output_root)),
             "phase1_target": str(target_path.relative_to(output_root)),
             "subset": subset,
-            "status": "ok",  # ok, problem
+            "status": "ok",
+            "is_cropped": is_cropped,  # ← 추가
         }
     
     def refresh_review(self):
@@ -661,6 +768,17 @@ class PairGeneratorGUI:
         self.bg_color_var.set(meta.get("bg_color", "#6b2d8f"))
         self.text_color_var.set(meta.get("text_color", "#ffffff"))
         
+        # 조명 상태 설정 (채널 간판만)
+        sign_type_key = meta.get("sign_type_key", "")
+        is_channel = sign_type_key.startswith("channel_")
+        if is_channel:
+            lights_enabled = meta.get("lights_enabled", False)
+            if isinstance(lights_enabled, str):
+                lights_enabled = lights_enabled.lower() in ("true", "1", "yes", "on")
+            self.lights_enabled_var.set(lights_enabled)
+        else:
+            self.lights_enabled_var.set(False)
+        
         # 정보 업데이트
         total_pairs = len(self.generated_pairs)
         current_idx = list(sorted(self.generated_pairs.keys())).index(self.current_pair_id) + 1
@@ -753,15 +871,21 @@ class PairGeneratorGUI:
         bg_hex = self.bg_color_var.get()
         text_hex = self.text_color_var.get()
         
+        # 조명 상태 (채널 간판만)
+        is_channel = sign_type_key.startswith("channel_")
+        lights_enabled = self.lights_enabled_var.get() if is_channel else False
+        text = meta.get("text", "간판")
+
         try:
             # Phase1 재생성
             phase1_img = generate_phase1_image(
-                text="간판",
+                text=text,
                 sign_type_key=sign_type_key,
                 bg_color=bg_hex,
                 text_color=text_hex,
                 width=512,
                 height=512,
+                lights_enabled=lights_enabled,
             )
             
             phase1_cropped = center_crop_and_resize(phase1_img, size=512)
@@ -771,6 +895,8 @@ class PairGeneratorGUI:
             # 메타데이터 업데이트
             meta["bg_color"] = bg_hex
             meta["text_color"] = text_hex
+            if is_channel:
+                meta["lights_enabled"] = lights_enabled
             
             # 메타데이터 파일 저장
             meta_path = output_root / "pairs_metadata.json"
@@ -792,6 +918,12 @@ class PairGeneratorGUI:
         meta = self.generated_pairs[self.current_pair_id]
         meta["bg_color"] = self.bg_color_var.get()
         meta["text_color"] = self.text_color_var.get()
+        
+        # 조명 상태 저장 (채널 간판만)
+        sign_type_key = meta.get("sign_type_key", "")
+        is_channel = sign_type_key.startswith("channel_")
+        if is_channel:
+            meta["lights_enabled"] = self.lights_enabled_var.get()
         
         # 메타데이터 파일 저장
         output_root = Path(self.output_path_var.get())

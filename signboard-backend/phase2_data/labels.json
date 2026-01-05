@@ -1,0 +1,665 @@
+{
+  "channel_front_wall": {
+    "day": [
+      {
+        "id": "channel_front_wall_channel_front_wall_scasi_wall_channel_wall_17_day_day_day_day_day",
+        "real_photo": "real_photos\\channel_front_wall\\day\\channel_front_wall_scasi_wall_channel_wall_17_day_day_day_day.JPG",
+        "sign_type": "channel",
+        "installation_type": "front_wall",
+        "sign_type_key": "channel_front_wall",
+        "time": "day",
+        "date_labeled": "2026-01-05 14:27:38",
+        "original_filename": "channel_front_wall_scasi_wall_channel_wall_17_day_day_day.JPG",
+        "lights_enabled": false,
+        "cropped_photo": "cropped_photos/channel_front_wall_day_scasi_wall_channel_wall_17_day_day_cropped.jpg",
+        "text": "FE",
+        "crop_region": {
+          "x": 190,
+          "y": 60,
+          "width": 75,
+          "height": 60
+        }
+      }
+    ],
+    "night": []
+  },
+  "channel_front_frame_bar": {
+    "day": [
+      {
+        "id": "channel_front_frame_bar_channel_front_frame_bar_channel_front_frame_bar_channel_frame_bar_03_day_day_day_day_day",
+        "real_photo": "real_photos\\channel_front_frame_bar\\day\\channel_front_frame_bar_channel_front_frame_bar_channel_frame_bar_03_day_day_day_day.JPG",
+        "sign_type": "channel",
+        "installation_type": "front_frame_bar",
+        "sign_type_key": "channel_front_frame_bar",
+        "time": "day",
+        "date_labeled": "2026-01-05 10:59:43",
+        "original_filename": "channel_front_frame_bar_channel_front_frame_bar_channel_frame_bar_03_day_day_day.JPG",
+        "lights_enabled": false,
+        "cropped_photo": "cropped_photos/channel_front_frame_bar_day_channel_front_frame_bar_channel_frame_bar_03_day_day_cropped.jpg",
+        "text": "모두",
+        "crop_region": {
+          "x": 321,
+          "y": 64,
+          "width": 411,
+          "height": 271
+        }
+      },
+      {
+        "id": "channel_front_frame_bar_channel_front_frame_bar_channel_front_frame_bar_channel_frame_bar_06_day_day_day_day_day",
+        "real_photo": "real_photos\\channel_front_frame_bar\\day\\channel_front_frame_bar_channel_front_frame_bar_channel_frame_bar_06_day_day_day_day.JPG",
+        "sign_type": "channel",
+        "installation_type": "front_frame_bar",
+        "sign_type_key": "channel_front_frame_bar",
+        "time": "day",
+        "date_labeled": "2026-01-05 11:00:01",
+        "original_filename": "channel_front_frame_bar_channel_front_frame_bar_channel_frame_bar_06_day_day_day.JPG",
+        "lights_enabled": true,
+        "cropped_photo": "cropped_photos/channel_front_frame_bar_day_channel_front_frame_bar_channel_frame_bar_06_day_day_cropped.jpg",
+        "text": "무",
+        "crop_region": {
+          "x": 353,
+          "y": 125,
+          "width": 179,
+          "height": 165
+        }
+      },
+      {
+        "id": "channel_front_frame_bar_channel_front_frame_bar_channel_front_frame_bar_channel_frame_bar_08_day_day_day_day_day",
+        "real_photo": "real_photos\\channel_front_frame_bar\\day\\channel_front_frame_bar_channel_front_frame_bar_channel_frame_bar_08_day_day_day_day.JPG",
+        "sign_type": "channel",
+        "installation_type": "front_frame_bar",
+        "sign_type_key": "channel_front_frame_bar",
+        "time": "day",
+        "date_labeled": "2026-01-05 11:00:19",
+        "original_filename": "channel_front_frame_bar_channel_front_frame_bar_channel_frame_bar_08_day_day_day.JPG",
+        "lights_enabled": false,
+        "cropped_photo": "cropped_photos/channel_front_frame_bar_day_channel_front_frame_bar_channel_frame_bar_08_day_day_cropped.jpg",
+        "text": "식당",
+        "crop_region": {
+          "x": 218,
+          "y": 64,
+          "width": 197,
+          "height": 134
+        }
+      },
+      {
+        "id": "channel_front_frame_bar_channel_front_frame_bar_channel_front_frame_bar_channel_frame_bar_11_day_day_day_day_day",
+        "real_photo": "real_photos\\channel_front_frame_bar\\day\\channel_front_frame_bar_channel_front_frame_bar_channel_frame_bar_11_day_day_day_day.JPG",
+        "sign_type": "channel",
+        "installation_type": "front_frame_bar",
+        "sign_type_key": "channel_front_frame_bar",
+        "time": "day",
+        "date_labeled": "2026-01-05 11:00:46",
+        "original_filename": "channel_front_frame_bar_channel_front_frame_bar_channel_frame_bar_11_day_day_day.JPG",
+        "lights_enabled": true,
+        "cropped_photo": "cropped_photos/channel_front_frame_bar_day_channel_front_frame_bar_channel_frame_bar_11_day_day_cropped.jpg",
+        "text": "공방",
+        "crop_region": {
+          "x": 257,
+          "y": 5,
+          "width": 141,
+          "height": 114
+        }
+      },
+      {
+        "id": "channel_front_frame_bar_channel_front_frame_bar_channel_front_frame_bar_channel_frame_bar_13_day_day_day_day_day",
+        "real_photo": "real_photos\\channel_front_frame_bar\\day\\channel_front_frame_bar_channel_front_frame_bar_channel_frame_bar_13_day_day_day_day.JPG",
+        "sign_type": "channel",
+        "installation_type": "front_frame_bar",
+        "sign_type_key": "channel_front_frame_bar",
+        "time": "day",
+        "date_labeled": "2026-01-05 11:01:05",
+        "original_filename": "channel_front_frame_bar_channel_front_frame_bar_channel_frame_bar_13_day_day_day.JPG",
+        "lights_enabled": false,
+        "cropped_photo": "cropped_photos/channel_front_frame_bar_day_channel_front_frame_bar_channel_frame_bar_13_day_day_cropped.jpg",
+        "text": "야간",
+        "crop_region": {
+          "x": 141,
+          "y": 10,
+          "width": 89,
+          "height": 84
+        }
+      },
+      {
+        "id": "channel_front_frame_bar_channel_front_frame_bar_channel_front_frame_bar_channel_frame_bar_19_day_day_day_day_day",
+        "real_photo": "real_photos\\channel_front_frame_bar\\day\\channel_front_frame_bar_channel_front_frame_bar_channel_frame_bar_19_day_day_day_day.JPG",
+        "sign_type": "channel",
+        "installation_type": "front_frame_bar",
+        "sign_type_key": "channel_front_frame_bar",
+        "time": "day",
+        "date_labeled": "2026-01-05 11:01:28",
+        "original_filename": "channel_front_frame_bar_channel_front_frame_bar_channel_frame_bar_19_day_day_day.JPG",
+        "lights_enabled": false,
+        "cropped_photo": "cropped_photos/channel_front_frame_bar_day_channel_front_frame_bar_channel_frame_bar_19_day_day_cropped.jpg",
+        "text": "마트",
+        "crop_region": {
+          "x": 118,
+          "y": 11,
+          "width": 134,
+          "height": 147
+        }
+      },
+      {
+        "id": "channel_front_frame_bar_channel_front_frame_bar_channel_front_frame_bar_channel_01_day_day_day_day_day",
+        "real_photo": "real_photos\\channel_front_frame_bar\\day\\channel_front_frame_bar_channel_front_frame_bar_channel_01_day_day_day_day.JPG",
+        "sign_type": "channel",
+        "installation_type": "front_frame_bar",
+        "sign_type_key": "channel_front_frame_bar",
+        "time": "day",
+        "date_labeled": "2026-01-05 14:21:14",
+        "original_filename": "channel_front_frame_bar_channel_front_frame_bar_channel_01_day_day_day.JPG",
+        "lights_enabled": false,
+        "cropped_photo": "cropped_photos/channel_front_frame_bar_day_channel_front_frame_bar_channel_01_day_day_cropped.jpg",
+        "text": "파란",
+        "crop_region": {
+          "x": 66,
+          "y": 18,
+          "width": 339,
+          "height": 187
+        }
+      },
+      {
+        "id": "channel_front_frame_bar_channel_front_frame_bar_channel_front_frame_bar_channel_frame_bar_07_day_day_day_day_day",
+        "real_photo": "real_photos\\channel_front_frame_bar\\day\\channel_front_frame_bar_channel_front_frame_bar_channel_frame_bar_07_day_day_day_day.JPG",
+        "sign_type": "channel",
+        "installation_type": "front_frame_bar",
+        "sign_type_key": "channel_front_frame_bar",
+        "time": "day",
+        "date_labeled": "2026-01-05 14:21:38",
+        "original_filename": "channel_front_frame_bar_channel_front_frame_bar_channel_frame_bar_07_day_day_day.JPG",
+        "lights_enabled": false,
+        "cropped_photo": "cropped_photos/channel_front_frame_bar_day_channel_front_frame_bar_channel_frame_bar_07_day_day_cropped.jpg",
+        "text": "H N",
+        "crop_region": {
+          "x": 66,
+          "y": 24,
+          "width": 116,
+          "height": 94
+        }
+      },
+      {
+        "id": "channel_front_frame_bar_channel_front_frame_bar_channel_front_frame_bar_channel_frame_bar_12_day_day_day_day_day",
+        "real_photo": "real_photos\\channel_front_frame_bar\\day\\channel_front_frame_bar_channel_front_frame_bar_channel_frame_bar_12_day_day_day_day.JPG",
+        "sign_type": "channel",
+        "installation_type": "front_frame_bar",
+        "sign_type_key": "channel_front_frame_bar",
+        "time": "day",
+        "date_labeled": "2026-01-05 14:21:58",
+        "original_filename": "channel_front_frame_bar_channel_front_frame_bar_channel_frame_bar_12_day_day_day.JPG",
+        "lights_enabled": true,
+        "cropped_photo": "cropped_photos/channel_front_frame_bar_day_channel_front_frame_bar_channel_frame_bar_12_day_day_cropped.jpg",
+        "text": "잉글",
+        "crop_region": {
+          "x": 166,
+          "y": 4,
+          "width": 85,
+          "height": 103
+        }
+      },
+      {
+        "id": "channel_front_frame_bar_channel_front_frame_bar_channel_front_frame_bar_channel_frame_bar_18_day_day_day_day_day",
+        "real_photo": "real_photos\\channel_front_frame_bar\\day\\channel_front_frame_bar_channel_front_frame_bar_channel_frame_bar_18_day_day_day_day.JPG",
+        "sign_type": "channel",
+        "installation_type": "front_frame_bar",
+        "sign_type_key": "channel_front_frame_bar",
+        "time": "day",
+        "date_labeled": "2026-01-05 14:28:05",
+        "original_filename": "channel_front_frame_bar_channel_front_frame_bar_channel_frame_bar_18_day_day_day.JPG",
+        "lights_enabled": false,
+        "cropped_photo": "cropped_photos/channel_front_frame_bar_day_channel_front_frame_bar_channel_frame_bar_18_day_day_cropped.jpg",
+        "text": "arn",
+        "crop_region": {
+          "x": 55,
+          "y": 45,
+          "width": 86,
+          "height": 76
+        }
+      },
+      {
+        "id": "channel_front_frame_bar_channel_front_frame_bar_channel_front_frame_bar_channel_frame_bar_10_day_day_day_day_day",
+        "real_photo": "real_photos\\channel_front_frame_bar\\day\\channel_front_frame_bar_channel_front_frame_bar_channel_frame_bar_10_day_day_day_day.JPG",
+        "sign_type": "channel",
+        "installation_type": "front_frame_bar",
+        "sign_type_key": "channel_front_frame_bar",
+        "time": "day",
+        "date_labeled": "2026-01-05 14:28:25",
+        "original_filename": "channel_front_frame_bar_channel_front_frame_bar_channel_frame_bar_10_day_day_day.JPG",
+        "lights_enabled": true,
+        "cropped_photo": "cropped_photos/channel_front_frame_bar_day_channel_front_frame_bar_channel_frame_bar_10_day_day_cropped.jpg",
+        "text": "CA",
+        "crop_region": {
+          "x": 100,
+          "y": 47,
+          "width": 75,
+          "height": 58
+        }
+      }
+    ],
+    "night": [
+      {
+        "id": "channel_front_frame_bar_channel_front_frame_bar_channel_front_frame_bar_channel_frame_bar_05_night_night_night_night_night",
+        "real_photo": "real_photos\\channel_front_frame_bar\\night\\channel_front_frame_bar_channel_front_frame_bar_channel_frame_bar_05_night_night_night_night.JPG",
+        "sign_type": "channel",
+        "installation_type": "front_frame_bar",
+        "sign_type_key": "channel_front_frame_bar",
+        "time": "night",
+        "date_labeled": "2026-01-05 14:28:46",
+        "original_filename": "channel_front_frame_bar_channel_front_frame_bar_channel_frame_bar_05_night_night_night.JPG",
+        "lights_enabled": true,
+        "cropped_photo": "cropped_photos/channel_front_frame_bar_night_channel_front_frame_bar_channel_frame_bar_05_night_night_cropped.jpg",
+        "text": "헤어",
+        "crop_region": {
+          "x": 202,
+          "y": 40,
+          "width": 73,
+          "height": 82
+        }
+      }
+    ]
+  },
+  "channel_front_frame_plate": {
+    "day": [
+      {
+        "id": "channel_front_frame_plate_channel_front_frame_plate_channel_front_wall_channel_front_frame_plate_channel_wall_20_day_day_day_day_day",
+        "real_photo": "real_photos\\channel_front_frame_plate\\day\\channel_front_frame_plate_channel_front_wall_channel_front_frame_plate_channel_wall_20_day_day_day_day.JPG",
+        "sign_type": "channel",
+        "installation_type": "front_frame_plate",
+        "sign_type_key": "channel_front_frame_plate",
+        "time": "day",
+        "date_labeled": "2026-01-05 11:01:53",
+        "original_filename": "channel_front_wall_channel_front_frame_plate_channel_wall_20_day_day_day.JPG",
+        "lights_enabled": false,
+        "cropped_photo": "cropped_photos/channel_front_frame_plate_day_channel_front_wall_channel_front_frame_plate_channel_wall_20_day_day_cropped.jpg",
+        "text": "정육",
+        "crop_region": {
+          "x": 983,
+          "y": 40,
+          "width": 911,
+          "height": 744
+        }
+      },
+      {
+        "id": "channel_front_frame_plate_channel_front_frame_plate_channel_front_frame_plate_channel_wall_04_night_day_day_day_day",
+        "real_photo": "real_photos\\channel_front_frame_plate\\day\\channel_front_frame_plate_channel_front_frame_plate_channel_wall_04_night_day_day_day.JPG",
+        "sign_type": "channel",
+        "installation_type": "front_frame_plate",
+        "sign_type_key": "channel_front_frame_plate",
+        "time": "day",
+        "date_labeled": "2026-01-05 14:22:23",
+        "original_filename": "channel_front_frame_plate_channel_front_frame_plate_channel_wall_04_night_day_day.JPG",
+        "lights_enabled": true,
+        "cropped_photo": "cropped_photos/channel_front_frame_plate_day_channel_front_frame_plate_channel_wall_04_night_day_cropped.jpg",
+        "text": "교대",
+        "crop_region": {
+          "x": 77,
+          "y": 29,
+          "width": 108,
+          "height": 61
+        }
+      }
+    ],
+    "night": []
+  },
+  "channel_back_wall": {
+    "day": [
+      {
+        "id": "channel_back_wall_channel_back_wall_02_day_day",
+        "real_photo": "real_photos\\channel_back_wall\\day\\channel_back_wall_02_day.JPG",
+        "sign_type": "channel",
+        "installation_type": "back_wall",
+        "sign_type_key": "channel_back_wall",
+        "time": "day",
+        "date_labeled": "2025-12-31 09:47:49",
+        "original_filename": "02.JPG",
+        "lights_enabled": true,
+        "cropped_photo": "cropped_photos/channel_back_wall_day_02_cropped.jpg",
+        "text": "BACH",
+        "crop_region": {
+          "x": 331,
+          "y": 23,
+          "width": 150,
+          "height": 163
+        }
+      },
+      {
+        "id": "channel_back_wall_channel_back_wall_channel_wall_09_day_cropped_day_day",
+        "real_photo": "real_photos\\channel_back_wall\\day\\channel_back_wall_channel_wall_09_day_cropped_day.jpg",
+        "sign_type": "channel",
+        "installation_type": "back_wall",
+        "sign_type_key": "channel_back_wall",
+        "time": "day",
+        "date_labeled": "2026-01-05 10:53:02",
+        "original_filename": "channel_back_wall_channel_wall_09_day_cropped.jpg",
+        "lights_enabled": true,
+        "cropped_photo": "cropped_photos/channel_back_wall_day_channel_wall_09_day_cropped_cropped.jpg",
+        "text": "옹글",
+        "crop_region": {
+          "x": 185,
+          "y": 167,
+          "width": 236,
+          "height": 187
+        }
+      }
+    ],
+    "night": []
+  },
+  "channel_back_frame_bar": {
+    "day": [],
+    "night": []
+  },
+  "channel_back_frame_plate": {
+    "day": [
+      {
+        "id": "channel_back_frame_plate_channel_back_frame_plate_channel_back_wall_channel_back_wall_channel_wall_15_day_day_day_day_day",
+        "real_photo": "real_photos\\channel_back_frame_plate\\day\\channel_back_frame_plate_channel_back_wall_channel_back_wall_channel_wall_15_day_day_day_day.JPG",
+        "sign_type": "channel",
+        "installation_type": "back_frame_plate",
+        "sign_type_key": "channel_back_frame_plate",
+        "time": "day",
+        "date_labeled": "2026-01-05 10:52:38",
+        "original_filename": "channel_back_wall_channel_back_wall_channel_wall_15_day_day_day.JPG",
+        "lights_enabled": true,
+        "cropped_photo": "cropped_photos/channel_back_frame_plate_day_channel_back_wall_channel_back_wall_channel_wall_15_day_day_cropped.jpg",
+        "text": "Ye",
+        "crop_region": {
+          "x": 115,
+          "y": 28,
+          "width": 117,
+          "height": 118
+        }
+      },
+      {
+        "id": "channel_back_frame_plate_channel_back_frame_plate_channel_back_wall_channel_back_wall_channel_wall_16_day_day_day_day_day",
+        "real_photo": "real_photos\\channel_back_frame_plate\\day\\channel_back_frame_plate_channel_back_wall_channel_back_wall_channel_wall_16_day_day_day_day.JPG",
+        "sign_type": "channel",
+        "installation_type": "back_frame_plate",
+        "sign_type_key": "channel_back_frame_plate",
+        "time": "day",
+        "date_labeled": "2026-01-05 10:59:21",
+        "original_filename": "channel_back_wall_channel_back_wall_channel_wall_16_day_day_day.JPG",
+        "lights_enabled": true,
+        "cropped_photo": "cropped_photos/channel_back_frame_plate_day_channel_back_wall_channel_back_wall_channel_wall_16_day_day_cropped.jpg",
+        "text": "OR",
+        "crop_region": {
+          "x": 299,
+          "y": 9,
+          "width": 147,
+          "height": 136
+        }
+      }
+    ],
+    "night": []
+  },
+  "scasi_wall": {
+    "day": [
+      {
+        "id": "scasi_wall_scasi_wall_scasi_wall_scasi_wall_23_day_day_day_day_day",
+        "real_photo": "real_photos\\scasi_wall\\day\\scasi_wall_scasi_wall_scasi_wall_23_day_day_day_day.JPG",
+        "sign_type": "scasi",
+        "installation_type": "wall",
+        "sign_type_key": "scasi_wall",
+        "time": "day",
+        "date_labeled": "2026-01-05 14:24:42",
+        "original_filename": "scasi_wall_scasi_wall_scasi_wall_23_day_day_day.JPG",
+        "cropped_photo": "cropped_photos/scasi_wall_day_scasi_wall_scasi_wall_23_day_day_cropped.jpg",
+        "text": "코딩",
+        "crop_region": {
+          "x": 279,
+          "y": 73,
+          "width": 223,
+          "height": 219
+        }
+      },
+      {
+        "id": "scasi_wall_scasi_wall_scasi_wall_scasi_wall_26_day_day_day_day_day",
+        "real_photo": "real_photos\\scasi_wall\\day\\scasi_wall_scasi_wall_scasi_wall_26_day_day_day_day.JPG",
+        "sign_type": "scasi",
+        "installation_type": "wall",
+        "sign_type_key": "scasi_wall",
+        "time": "day",
+        "date_labeled": "2026-01-05 14:25:31",
+        "original_filename": "scasi_wall_scasi_wall_scasi_wall_26_day_day_day.JPG",
+        "cropped_photo": "cropped_photos/scasi_wall_day_scasi_wall_scasi_wall_26_day_day_cropped.jpg",
+        "text": "CA",
+        "crop_region": {
+          "x": 40,
+          "y": 39,
+          "width": 133,
+          "height": 141
+        }
+      },
+      {
+        "id": "scasi_wall_scasi_wall_scasi_wall_scasi_wall_24_day_day_day_day_day",
+        "real_photo": "real_photos\\scasi_wall\\day\\scasi_wall_scasi_wall_scasi_wall_24_day_day_day_day.JPG",
+        "sign_type": "scasi",
+        "installation_type": "wall",
+        "sign_type_key": "scasi_wall",
+        "time": "day",
+        "date_labeled": "2026-01-05 14:25:53",
+        "original_filename": "scasi_wall_scasi_wall_scasi_wall_24_day_day_day.JPG",
+        "cropped_photo": "cropped_photos/scasi_wall_day_scasi_wall_scasi_wall_24_day_day_cropped.jpg",
+        "text": "Dig",
+        "crop_region": {
+          "x": 215,
+          "y": 37,
+          "width": 166,
+          "height": 191
+        }
+      }
+    ],
+    "night": []
+  },
+  "scasi_frame_bar": {
+    "day": [],
+    "night": []
+  },
+  "scasi_frame_plate": {
+    "day": [
+      {
+        "id": "scasi_frame_plate_scasi_frame_plate_scasi_frame_plate_scasi_frame_plate_21_day_day_day_day_day",
+        "real_photo": "real_photos\\scasi_frame_plate\\day\\scasi_frame_plate_scasi_frame_plate_scasi_frame_plate_21_day_day_day_day.JPG",
+        "sign_type": "scasi",
+        "installation_type": "frame_plate",
+        "sign_type_key": "scasi_frame_plate",
+        "time": "day",
+        "date_labeled": "2026-01-05 14:23:58",
+        "original_filename": "scasi_frame_plate_scasi_frame_plate_scasi_frame_plate_21_day_day_day.JPG",
+        "cropped_photo": "cropped_photos/scasi_frame_plate_day_scasi_frame_plate_scasi_frame_plate_21_day_day_cropped.jpg",
+        "text": "odipie",
+        "crop_region": {
+          "x": 35,
+          "y": 9,
+          "width": 336,
+          "height": 199
+        }
+      },
+      {
+        "id": "scasi_frame_plate_scasi_frame_plate_scasi_frame_plate_scasi_wall_22_day_day_day_day_day",
+        "real_photo": "real_photos\\scasi_frame_plate\\day\\scasi_frame_plate_scasi_frame_plate_scasi_wall_22_day_day_day_day.JPG",
+        "sign_type": "scasi",
+        "installation_type": "frame_plate",
+        "sign_type_key": "scasi_frame_plate",
+        "time": "day",
+        "date_labeled": "2026-01-05 14:24:21",
+        "original_filename": "scasi_frame_plate_scasi_frame_plate_scasi_wall_22_day_day_day.JPG",
+        "cropped_photo": "cropped_photos/scasi_frame_plate_day_scasi_frame_plate_scasi_wall_22_day_day_cropped.jpg",
+        "text": "DO",
+        "crop_region": {
+          "x": 112,
+          "y": 36,
+          "width": 166,
+          "height": 181
+        }
+      },
+      {
+        "id": "scasi_frame_plate_scasi_frame_plate_scasi_wall_scasi_03_day_day_day_day_day",
+        "real_photo": "real_photos\\scasi_frame_plate\\day\\scasi_frame_plate_scasi_wall_scasi_03_day_day_day_day.JPG",
+        "sign_type": "scasi",
+        "installation_type": "frame_plate",
+        "sign_type_key": "scasi_frame_plate",
+        "time": "day",
+        "date_labeled": "2026-01-05 14:26:11",
+        "original_filename": "scasi_frame_plate_scasi_wall_scasi_03_day_day_day.JPG",
+        "cropped_photo": "cropped_photos/scasi_frame_plate_day_scasi_wall_scasi_03_day_day_cropped.jpg",
+        "text": "청",
+        "crop_region": {
+          "x": 299,
+          "y": 38,
+          "width": 164,
+          "height": 229
+        }
+      },
+      {
+        "id": "scasi_frame_plate_scasi_frame_plate_scasi_frame_plate_scasi_frame_plate_25_day_day_day_day_day",
+        "real_photo": "real_photos\\scasi_frame_plate\\day\\scasi_frame_plate_scasi_frame_plate_scasi_frame_plate_25_day_day_day_day.JPG",
+        "sign_type": "scasi",
+        "installation_type": "frame_plate",
+        "sign_type_key": "scasi_frame_plate",
+        "time": "day",
+        "date_labeled": "2026-01-05 14:26:30",
+        "original_filename": "scasi_frame_plate_scasi_frame_plate_scasi_frame_plate_25_day_day_day.JPG",
+        "cropped_photo": "cropped_photos/scasi_frame_plate_day_scasi_frame_plate_scasi_frame_plate_25_day_day_cropped.jpg",
+        "text": "신영",
+        "crop_region": {
+          "x": 82,
+          "y": 41,
+          "width": 171,
+          "height": 140
+        }
+      }
+    ],
+    "night": []
+  },
+  "flex_frame_plate": {
+    "day": [
+      {
+        "id": "flex_frame_plate_flex_frame_plate_flex_frame_plate_flex_02_day_day_day_day_day",
+        "real_photo": "real_photos\\flex_frame_plate\\day\\flex_frame_plate_flex_frame_plate_flex_02_day_day_day_day.JPG",
+        "sign_type": "flex",
+        "installation_type": "frame_plate",
+        "sign_type_key": "flex_frame_plate",
+        "time": "day",
+        "date_labeled": "2026-01-05 11:02:10",
+        "original_filename": "flex_frame_plate_flex_frame_plate_flex_02_day_day_day.JPG",
+        "cropped_photo": "cropped_photos/flex_frame_plate_day_flex_frame_plate_flex_02_day_day_cropped.jpg",
+        "text": "종묘",
+        "crop_region": {
+          "x": 481,
+          "y": 65,
+          "width": 246,
+          "height": 123
+        }
+      },
+      {
+        "id": "flex_frame_plate_flex_frame_plate_flex_frame_plate_flex_04_day_day_day_day_day",
+        "real_photo": "real_photos\\flex_frame_plate\\day\\flex_frame_plate_flex_frame_plate_flex_04_day_day_day_day.JPG",
+        "sign_type": "flex",
+        "installation_type": "frame_plate",
+        "sign_type_key": "flex_frame_plate",
+        "time": "day",
+        "date_labeled": "2026-01-05 14:22:44",
+        "original_filename": "flex_frame_plate_flex_frame_plate_flex_04_day_day_day.JPG",
+        "cropped_photo": "cropped_photos/flex_frame_plate_day_flex_frame_plate_flex_04_day_day_cropped.jpg",
+        "text": "CO",
+        "crop_region": {
+          "x": 443,
+          "y": 113,
+          "width": 121,
+          "height": 109
+        }
+      },
+      {
+        "id": "flex_frame_plate_flex_frame_plate_flex_frame_plate_flex_frame_plate_28_day_day_day_day_day",
+        "real_photo": "real_photos\\flex_frame_plate\\day\\flex_frame_plate_flex_frame_plate_flex_frame_plate_28_day_day_day_day.JPG",
+        "sign_type": "flex",
+        "installation_type": "frame_plate",
+        "sign_type_key": "flex_frame_plate",
+        "time": "day",
+        "date_labeled": "2026-01-05 14:23:16",
+        "original_filename": "flex_frame_plate_flex_frame_plate_flex_frame_plate_28_day_day_day.JPG",
+        "cropped_photo": "cropped_photos/flex_frame_plate_day_flex_frame_plate_flex_frame_plate_28_day_day_cropped.jpg",
+        "text": "포차",
+        "crop_region": {
+          "x": 524,
+          "y": 120,
+          "width": 261,
+          "height": 153
+        }
+      },
+      {
+        "id": "flex_frame_plate_flex_frame_plate_flex_frame_plate_flex_frame_plate_30_day_day_day_day_day",
+        "real_photo": "real_photos\\flex_frame_plate\\day\\flex_frame_plate_flex_frame_plate_flex_frame_plate_30_day_day_day_day.JPG",
+        "sign_type": "flex",
+        "installation_type": "frame_plate",
+        "sign_type_key": "flex_frame_plate",
+        "time": "day",
+        "date_labeled": "2026-01-05 14:23:32",
+        "original_filename": "flex_frame_plate_flex_frame_plate_flex_frame_plate_30_day_day_day.JPG",
+        "cropped_photo": "cropped_photos/flex_frame_plate_day_flex_frame_plate_flex_frame_plate_30_day_day_cropped.jpg",
+        "text": "도취",
+        "crop_region": {
+          "x": 127,
+          "y": 335,
+          "width": 204,
+          "height": 360
+        }
+      },
+      {
+        "id": "flex_frame_plate_flex_frame_plate_flex_frame_plate_flex_frame_plate_29_night_night_night_day_day",
+        "real_photo": "real_photos\\flex_frame_plate\\day\\flex_frame_plate_flex_frame_plate_flex_frame_plate_29_night_night_night_day.JPG",
+        "sign_type": "flex",
+        "installation_type": "frame_plate",
+        "sign_type_key": "flex_frame_plate",
+        "time": "day",
+        "date_labeled": "2026-01-05 14:27:00",
+        "original_filename": "flex_frame_plate_flex_frame_plate_flex_frame_plate_29_night_night_night.JPG",
+        "cropped_photo": "cropped_photos/flex_frame_plate_day_flex_frame_plate_flex_frame_plate_29_night_night_night_cropped.jpg",
+        "text": "포차",
+        "crop_region": {
+          "x": 498,
+          "y": 116,
+          "width": 251,
+          "height": 144
+        }
+      },
+      {
+        "id": "flex_frame_plate_flex_frame_plate_flex_frame_plate_flex_frame_plate_27_day_day_day_day_day",
+        "real_photo": "real_photos\\flex_frame_plate\\day\\flex_frame_plate_flex_frame_plate_flex_frame_plate_27_day_day_day_day.JPG",
+        "sign_type": "flex",
+        "installation_type": "frame_plate",
+        "sign_type_key": "flex_frame_plate",
+        "time": "day",
+        "date_labeled": "2026-01-05 14:27:10",
+        "original_filename": "flex_frame_plate_flex_frame_plate_flex_frame_plate_27_day_day_day.JPG",
+        "cropped_photo": "cropped_photos/flex_frame_plate_day_flex_frame_plate_flex_frame_plate_27_day_day_cropped.jpg",
+        "text": "포차",
+        "crop_region": {
+          "x": 513,
+          "y": 107,
+          "width": 280,
+          "height": 136
+        }
+      }
+    ],
+    "night": [
+      {
+        "id": "flex_frame_plate_flex_frame_plate_flex_frame_plate_flex_frame_plate_31_night_night_night_night_night",
+        "real_photo": "real_photos\\flex_frame_plate\\night\\flex_frame_plate_flex_frame_plate_flex_frame_plate_31_night_night_night_night.JPG",
+        "sign_type": "flex",
+        "installation_type": "frame_plate",
+        "sign_type_key": "flex_frame_plate",
+        "time": "night",
+        "date_labeled": "2026-01-05 14:26:49",
+        "original_filename": "flex_frame_plate_flex_frame_plate_flex_frame_plate_31_night_night_night.JPG",
+        "cropped_photo": "cropped_photos/flex_frame_plate_night_flex_frame_plate_flex_frame_plate_31_night_night_cropped.jpg",
+        "text": "포차",
+        "crop_region": {
+          "x": 83,
+          "y": 549,
+          "width": 192,
+          "height": 274
+        }
+      }
+    ]
+  }
+}

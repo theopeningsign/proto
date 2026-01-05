@@ -1,0 +1,480 @@
+"""
+Colab 노트북 생성 스크립트
+"""
+import json
+
+# 노트북 셀 정의
+cells = []
+
+# Markdown: 헤더
+cells.append({
+    "cell_type": "markdown",
+    "metadata": {},
+    "source": [
+        "# 🎨 간판 Pix2Pix 학습 노트북\n",
+        "\n",
+        "**목적:** Phase 1 CG 이미지를 실제 사진처럼 변환하는 모델 학습\n",
+        "\n",
+        "**데이터:** paired_data (INPUT: CG 간판, TARGET: 실제 사진)\n",
+        "\n",
+        "---"
+    ]
+})
+
+# Markdown: 사전 준비
+cells.append({
+    "cell_type": "markdown",
+    "metadata": {},
+    "source": [
+        "## 📋 사전 준비\n",
+        "\n",
+        "1. ✅ Google Drive에 데이터 업로드 완료 (`Colab_Signboard_Data` 폴더)\n",
+        "2. ✅ 이 노트북을 Google Colab에서 열기\n",
+        "3. ✅ GPU 런타임 사용 확인 (런타임 → 런타임 유형 변경 → GPU)"
+    ]
+})
+
+# Markdown: 1. 환경 확인
+cells.append({
+    "cell_type": "markdown",
+    "metadata": {},
+    "source": ["## 1️⃣ 환경 확인 및 GPU 설정"]
+})
+
+# Code: GPU 확인
+cells.append({
+    "cell_type": "code",
+    "execution_count": None,
+    "metadata": {},
+    "outputs": [],
+    "source": [
+        "# GPU 확인\n",
+        "import torch\n",
+        "print(f\"PyTorch 버전: {torch.__version__}\")\n",
+        "print(f\"CUDA 사용 가능: {torch.cuda.is_available()}\")\n",
+        "if torch.cuda.is_available():\n",
+        "    print(f\"GPU: {torch.cuda.get_device_name(0)}\")\n",
+        "    print(f\"CUDA 버전: {torch.version.cuda}\")\n",
+        "else:\n",
+        "    print(\"⚠️ GPU가 감지되지 않습니다. 런타임을 GPU로 변경하세요.\")"
+    ]
+})
+
+# Markdown: 2. Google Drive 연결
+cells.append({
+    "cell_type": "markdown",
+    "metadata": {},
+    "source": ["## 2️⃣ Google Drive 연결"]
+})
+
+# Code: Drive 마운트
+cells.append({
+    "cell_type": "code",
+    "execution_count": None,
+    "metadata": {},
+    "outputs": [],
+    "source": [
+        "# Google Drive 마운트\n",
+        "from google.colab import drive\n",
+        "drive.mount('/content/drive')\n",
+        "\n",
+        "# 데이터 경로 확인\n",
+        "import os\n",
+        "DATA_PATH = '/content/drive/MyDrive/Colab_Signboard_Data'\n",
+        "\n",
+        "if os.path.exists(DATA_PATH):\n",
+        "    print(f\"✅ 데이터 경로 확인: {DATA_PATH}\")\n",
+        "    # 파일 개수 확인\n",
+        "    train_input_count = len([f for f in os.listdir(os.path.join(DATA_PATH, 'train', 'input')) if f.endswith(('.png', '.jpg'))])\n",
+        "    train_target_count = len([f for f in os.listdir(os.path.join(DATA_PATH, 'train', 'target')) if f.endswith(('.png', '.jpg'))])\n",
+        "    test_input_count = len([f for f in os.listdir(os.path.join(DATA_PATH, 'test', 'input')) if f.endswith(('.png', '.jpg'))])\n",
+        "    test_target_count = len([f for f in os.listdir(os.path.join(DATA_PATH, 'test', 'target')) if f.endswith(('.png', '.jpg'))])\n",
+        "    print(f\"\\n📊 데이터 통계:\")\n",
+        "    print(f\"  Train: {train_input_count} input, {train_target_count} target\")\n",
+        "    print(f\"  Test: {test_input_count} input, {test_target_count} target\")\n",
+        "else:\n",
+        "    print(f\"❌ 데이터 경로를 찾을 수 없습니다: {DATA_PATH}\")\n",
+        "    print(\"\\n📋 다음을 확인하세요:\")\n",
+        "    print(\"  1. Google Drive에 'Colab_Signboard_Data' 폴더가 있는지\")\n",
+        "    print(\"  2. 폴더 구조가 올바른지 (train/input, train/target, test/input, test/target)\")"
+    ]
+})
+
+# Markdown: 3. Pix2Pix 설치
+cells.append({
+    "cell_type": "markdown",
+    "metadata": {},
+    "source": ["## 3️⃣ Pix2Pix 저장소 클론 및 설치"]
+})
+
+# Code: Pix2Pix 설치
+cells.append({
+    "cell_type": "code",
+    "execution_count": None,
+    "metadata": {},
+    "outputs": [],
+    "source": [
+        "# 작업 디렉토리로 이동\n",
+        "%cd /content\n",
+        "\n",
+        "# Pix2Pix 저장소 클론 (이미 있으면 스킵)\n",
+        "if not os.path.exists('pytorch-CycleGAN-and-pix2pix'):\n",
+        "    !git clone https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix.git\n",
+        "    print(\"✅ 저장소 클론 완료\")\n",
+        "else:\n",
+        "    print(\"✅ 저장소가 이미 있습니다\")\n",
+        "\n",
+        "%cd pytorch-CycleGAN-and-pix2pix\n",
+        "\n",
+        "# 필요한 라이브러리 설치\n",
+        "!pip install -q dominate visdom\n",
+        "print(\"✅ 필요한 라이브러리 설치 완료\")"
+    ]
+})
+
+# Markdown: 4. 데이터 준비
+cells.append({
+    "cell_type": "markdown",
+    "metadata": {},
+    "source": ["## 4️⃣ 데이터를 Pix2Pix 형식으로 준비"]
+})
+
+# Code: 데이터 준비
+cells.append({
+    "cell_type": "code",
+    "execution_count": None,
+    "metadata": {},
+    "outputs": [],
+    "source": [
+        "# Pix2Pix 데이터 형식으로 변환\n",
+        "import shutil\n",
+        "\n",
+        "DATASET_NAME = 'signboards'\n",
+        "DATASET_DIR = f'/content/pytorch-CycleGAN-and-pix2pix/datasets/{DATASET_NAME}'\n",
+        "\n",
+        "# 디렉토리 생성\n",
+        "os.makedirs(f'{DATASET_DIR}/train/A', exist_ok=True)\n",
+        "os.makedirs(f'{DATASET_DIR}/train/B', exist_ok=True)\n",
+        "os.makedirs(f'{DATASET_DIR}/test/A', exist_ok=True)\n",
+        "os.makedirs(f'{DATASET_DIR}/test/B', exist_ok=True)\n",
+        "\n",
+        "# 심볼릭 링크 생성 (복사 대신 링크 사용 - 빠름)\n",
+        "# Train\n",
+        "!ln -s \"{DATA_PATH}/train/input/\"* \"{DATASET_DIR}/train/A/\" 2>/dev/null || true\n",
+        "!ln -s \"{DATA_PATH}/train/target/\"* \"{DATASET_DIR}/train/B/\" 2>/dev/null || true\n",
+        "\n",
+        "# Test\n",
+        "!ln -s \"{DATA_PATH}/test/input/\"* \"{DATASET_DIR}/test/A/\" 2>/dev/null || true\n",
+        "!ln -s \"{DATA_PATH}/test/target/\"* \"{DATASET_DIR}/test/B/\" 2>/dev/null || true\n",
+        "\n",
+        "# 확인\n",
+        "train_a_count = len([f for f in os.listdir(f'{DATASET_DIR}/train/A') if not f.startswith('.')])\n",
+        "train_b_count = len([f for f in os.listdir(f'{DATASET_DIR}/train/B') if not f.startswith('.')])\n",
+        "test_a_count = len([f for f in os.listdir(f'{DATASET_DIR}/test/A') if not f.startswith('.')])\n",
+        "test_b_count = len([f for f in os.listdir(f'{DATASET_DIR}/test/B') if not f.startswith('.')])\n",
+        "\n",
+        "print(f\"✅ 데이터 준비 완료:\")\n",
+        "print(f\"  Train: A={train_a_count}, B={train_b_count}\")\n",
+        "print(f\"  Test: A={test_a_count}, B={test_b_count}\")"
+    ]
+})
+
+# Markdown: 5. 샘플 확인
+cells.append({
+    "cell_type": "markdown",
+    "metadata": {},
+    "source": ["## 5️⃣ 데이터 샘플 확인"]
+})
+
+# Code: 샘플 확인
+cells.append({
+    "cell_type": "code",
+    "execution_count": None,
+    "metadata": {},
+    "outputs": [],
+    "source": [
+        "# 샘플 이미지 확인\n",
+        "from PIL import Image\n",
+        "import matplotlib.pyplot as plt\n",
+        "\n",
+        "def show_sample(train_dir, sample_idx=0):\n",
+        "    a_files = sorted([f for f in os.listdir(f'{train_dir}/A') if f.endswith(('.png', '.jpg')) and not f.startswith('.')])\n",
+        "    b_files = sorted([f for f in os.listdir(f'{train_dir}/B') if f.endswith(('.png', '.jpg')) and not f.startswith('.')])\n",
+        "    \n",
+        "    if sample_idx < len(a_files) and sample_idx < len(b_files):\n",
+        "        a_path = os.path.join(train_dir, 'A', a_files[sample_idx])\n",
+        "        b_path = os.path.join(train_dir, 'B', b_files[sample_idx])\n",
+        "        \n",
+        "        fig, axes = plt.subplots(1, 2, figsize=(12, 6))\n",
+        "        \n",
+        "        img_a = Image.open(a_path)\n",
+        "        axes[0].imshow(img_a)\n",
+        "        axes[0].set_title(f'INPUT (CG) - {a_files[sample_idx]}', fontsize=12)\n",
+        "        axes[0].axis('off')\n",
+        "        \n",
+        "        img_b = Image.open(b_path)\n",
+        "        axes[1].imshow(img_b)\n",
+        "        axes[1].set_title(f'TARGET (실제 사진) - {b_files[sample_idx]}', fontsize=12)\n",
+        "        axes[1].axis('off')\n",
+        "        \n",
+        "        plt.tight_layout()\n",
+        "        plt.show()\n",
+        "    else:\n",
+        "        print(f\"❌ 샘플 인덱스 {sample_idx}를 찾을 수 없습니다.\")\n",
+        "\n",
+        "print(\"📸 Train 데이터 샘플:\")\n",
+        "show_sample(f'{DATASET_DIR}/train', 0)\n",
+        "\n",
+        "print(\"\\n📸 Test 데이터 샘플:\")\n",
+        "show_sample(f'{DATASET_DIR}/test', 0)"
+    ]
+})
+
+# Markdown: 6. 학습 시작
+cells.append({
+    "cell_type": "markdown",
+    "metadata": {},
+    "source": ["## 6️⃣ 학습 시작"]
+})
+
+# Code: 학습 파라미터
+cells.append({
+    "cell_type": "code",
+    "execution_count": None,
+    "metadata": {},
+    "outputs": [],
+    "source": [
+        "# 학습 파라미터 설정\n",
+        "MODEL_NAME = 'signboard_pix2pix_v1'\n",
+        "EPOCHS = 100\n",
+        "EPOCHS_DECAY = 100  # Learning rate decay epoch\n",
+        "BATCH_SIZE = 1  # GPU 메모리에 따라 조정 (1, 2, 4 등)\n",
+        "\n",
+        "print(f\"🎯 학습 설정:\")\n",
+        "print(f\"  모델 이름: {MODEL_NAME}\")\n",
+        "print(f\"  Epochs: {EPOCHS} + {EPOCHS_DECAY} (decay)\")\n",
+        "print(f\"  Batch size: {BATCH_SIZE}\")\n",
+        "print(f\"  데이터셋: {DATASET_NAME}\")\n",
+        "print(f\"\\n⏱️  예상 소요 시간: 2-4시간 (GPU 기준)\")\n",
+        "print(f\"\\n💡 중간 결과는 checkpoints/{MODEL_NAME}/web/images/ 에 저장됩니다.\")"
+    ]
+})
+
+# Code: 학습 실행
+cells.append({
+    "cell_type": "code",
+    "execution_count": None,
+    "metadata": {},
+    "outputs": [],
+    "source": [
+        "# 학습 실행\n",
+        "!python train.py \\\n",
+        "  --dataroot ./datasets/{DATASET_NAME} \\\n",
+        "  --name {MODEL_NAME} \\\n",
+        "  --model pix2pix \\\n",
+        "  --direction AtoB \\\n",
+        "  --batch_size {BATCH_SIZE} \\\n",
+        "  --n_epochs {EPOCHS} \\\n",
+        "  --n_epochs_decay {EPOCHS_DECAY}"
+    ]
+})
+
+# Markdown: 7. 중간 결과
+cells.append({
+    "cell_type": "markdown",
+    "metadata": {},
+    "source": ["## 7️⃣ 중간 결과 확인 (학습 중간에 실행 가능)"]
+})
+
+# Code: 중간 결과 확인
+cells.append({
+    "cell_type": "code",
+    "execution_count": None,
+    "metadata": {},
+    "outputs": [],
+    "source": [
+        "# 가장 최근 epoch의 결과 확인\n",
+        "result_dir = f'/content/pytorch-CycleGAN-and-pix2pix/checkpoints/{MODEL_NAME}/web/images'\n",
+        "\n",
+        "if os.path.exists(result_dir):\n",
+        "    # 가장 최근 epoch 찾기 (디렉토리만, epoch + 숫자 패턴만)\n",
+        "    import re\n",
+        "    epoch_dirs = []\n",
+        "    for item in os.listdir(result_dir):\n",
+        "        item_path = os.path.join(result_dir, item)\n",
+        "        # epoch로 시작하고 디렉토리이며, 숫자로만 구성된 것만\n",
+        "        if item.startswith('epoch') and os.path.isdir(item_path):\n",
+        "            # epoch 뒤에 숫자만 있는지 확인\n",
+        "            match = re.match(r'^epoch(\\d+)$', item)\n",
+        "            if match:\n",
+        "                epoch_dirs.append(item)\n",
+        "    \n",
+        "    if epoch_dirs:\n",
+        "        latest_epoch = max(epoch_dirs, key=lambda x: int(re.match(r'^epoch(\\d+)$', x).group(1)))\n",
+        "        epoch_dir = os.path.join(result_dir, latest_epoch)\n",
+        "        \n",
+        "        # 결과 이미지 표시\n",
+        "        real_a_path = os.path.join(epoch_dir, 'real_A.png')\n",
+        "        fake_b_path = os.path.join(epoch_dir, 'fake_B.png')\n",
+        "        real_b_path = os.path.join(epoch_dir, 'real_B.png')\n",
+        "        \n",
+        "        if all(os.path.exists(p) for p in [real_a_path, fake_b_path, real_b_path]):\n",
+        "            fig, axes = plt.subplots(1, 3, figsize=(18, 6))\n",
+        "            \n",
+        "            axes[0].imshow(Image.open(real_a_path))\n",
+        "            axes[0].set_title('INPUT (CG)', fontsize=14)\n",
+        "            axes[0].axis('off')\n",
+        "            \n",
+        "            axes[1].imshow(Image.open(fake_b_path))\n",
+        "            axes[1].set_title(f'OUTPUT (생성됨) - Epoch {latest_epoch}', fontsize=14)\n",
+        "            axes[1].axis('off')\n",
+        "            \n",
+        "            axes[2].imshow(Image.open(real_b_path))\n",
+        "            axes[2].set_title('TARGET (실제)', fontsize=14)\n",
+        "            axes[2].axis('off')\n",
+        "            \n",
+        "            plt.tight_layout()\n",
+        "            plt.show()\n",
+        "        else:\n",
+        "            print(f\"⚠️ {latest_epoch}의 이미지를 찾을 수 없습니다.\")\n",
+        "    else:\n",
+        "        print(\"⚠️ 결과 이미지가 아직 생성되지 않았습니다.\")\n",
+        "else:\n",
+        "    print(f\"⚠️ 결과 디렉토리를 찾을 수 없습니다: {result_dir}\")"
+    ]
+})
+
+# Markdown: 8. 테스트
+cells.append({
+    "cell_type": "markdown",
+    "metadata": {},
+    "source": ["## 8️⃣ 테스트 실행 (학습 완료 후)"]
+})
+
+# Code: 테스트 실행
+cells.append({
+    "cell_type": "code",
+    "execution_count": None,
+    "metadata": {},
+    "outputs": [],
+    "source": [
+        "# 테스트 실행\n",
+        "!python test.py \\\n",
+        "  --dataroot ./datasets/{DATASET_NAME} \\\n",
+        "  --name {MODEL_NAME} \\\n",
+        "  --model pix2pix \\\n",
+        "  --direction AtoB \\\n",
+        "  --epoch latest"
+    ]
+})
+
+# Markdown: 9. 테스트 결과
+cells.append({
+    "cell_type": "markdown",
+    "metadata": {},
+    "source": ["## 9️⃣ 테스트 결과 확인"]
+})
+
+# Code: 테스트 결과 확인
+cells.append({
+    "cell_type": "code",
+    "execution_count": None,
+    "metadata": {},
+    "outputs": [],
+    "source": [
+        "# 테스트 결과 이미지 표시\n",
+        "test_result_dir = f'/content/pytorch-CycleGAN-and-pix2pix/results/{MODEL_NAME}/test_latest/images'\n",
+        "\n",
+        "if os.path.exists(test_result_dir):\n",
+        "    test_files = sorted([f for f in os.listdir(test_result_dir) if f.endswith('.png')])\n",
+        "    \n",
+        "    # 첫 번째 샘플 표시\n",
+        "    if test_files:\n",
+        "        real_a_files = [f for f in test_files if 'real_A' in f]\n",
+        "        fake_b_files = [f for f in test_files if 'fake_B' in f]\n",
+        "        real_b_files = [f for f in test_files if 'real_B' in f]\n",
+        "        \n",
+        "        num_samples = min(3, len(real_a_files))  # 최대 3개 샘플\n",
+        "        \n",
+        "        for i in range(num_samples):\n",
+        "            fig, axes = plt.subplots(1, 3, figsize=(18, 6))\n",
+        "            \n",
+        "            axes[0].imshow(Image.open(os.path.join(test_result_dir, real_a_files[i])))\n",
+        "            axes[0].set_title('INPUT', fontsize=14)\n",
+        "            axes[0].axis('off')\n",
+        "            \n",
+        "            axes[1].imshow(Image.open(os.path.join(test_result_dir, fake_b_files[i])))\n",
+        "            axes[1].set_title('OUTPUT (모델 생성)', fontsize=14)\n",
+        "            axes[1].axis('off')\n",
+        "            \n",
+        "            axes[2].imshow(Image.open(os.path.join(test_result_dir, real_b_files[i])))\n",
+        "            axes[2].set_title('TARGET (실제)', fontsize=14)\n",
+        "            axes[2].axis('off')\n",
+        "            \n",
+        "            plt.tight_layout()\n",
+        "            plt.show()\n",
+        "    else:\n",
+        "        print(\"⚠️ 테스트 결과 파일을 찾을 수 없습니다.\")\n",
+        "else:\n",
+        "    print(f\"⚠️ 테스트 결과 디렉토리를 찾을 수 없습니다: {test_result_dir}\")"
+    ]
+})
+
+# Markdown: 10. 모델 다운로드
+cells.append({
+    "cell_type": "markdown",
+    "metadata": {},
+    "source": ["## 🔟 모델 다운로드 (선택사항)"]
+})
+
+# Code: 모델 다운로드
+cells.append({
+    "cell_type": "code",
+    "execution_count": None,
+    "metadata": {},
+    "outputs": [],
+    "source": [
+        "# 학습된 모델을 Google Drive에 저장 (선택사항)\n",
+        "checkpoint_dir = f'/content/pytorch-CycleGAN-and-pix2pix/checkpoints/{MODEL_NAME}'\n",
+        "drive_save_dir = '/content/drive/MyDrive/Colab_Signboard_Models'\n",
+        "\n",
+        "if os.path.exists(checkpoint_dir):\n",
+        "    os.makedirs(drive_save_dir, exist_ok=True)\n",
+        "    \n",
+        "    # 모델 파일 복사\n",
+        "    !cp -r \"{checkpoint_dir}\" \"{drive_save_dir}/\"\n",
+        "    \n",
+        "    print(f\"✅ 모델이 {drive_save_dir}에 저장되었습니다.\")\n",
+        "else:\n",
+        "    print(f\"⚠️ 체크포인트 디렉토리를 찾을 수 없습니다: {checkpoint_dir}\")"
+    ]
+})
+
+# 노트북 메타데이터
+notebook = {
+    "cells": cells,
+    "metadata": {
+        "accelerator": "GPU",
+        "colab": {
+            "collapsed_sections": [],
+            "name": "pix2pix_training",
+            "provenance": []
+        },
+        "kernelspec": {
+            "display_name": "Python 3",
+            "name": "python3"
+        },
+        "language_info": {
+            "name": "python"
+        }
+    },
+    "nbformat": 4,
+    "nbformat_minor": 0
+}
+
+# 파일 저장
+with open("pix2pix_training.ipynb", "w", encoding="utf-8") as f:
+    json.dump(notebook, f, ensure_ascii=False, indent=2)
+
+print("노트북 파일 생성 완료: pix2pix_training.ipynb")
+

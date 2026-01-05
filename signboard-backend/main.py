@@ -1212,12 +1212,9 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
     
     elif sign_type in ["후광채널", "전후광채널"]:
         # 발광 간판: 후광/전후광
-        # 조명 켜졌을 때: 글자 색상을 더 밝게 (1.4배)
-        if lights_enabled and sign_type == "후광채널":
-            text_rgb_bright = tuple(min(255, int(c * 1.4)) for c in text_rgb)
-            text_rgb_for_layer = text_rgb_bright
-        else:
-            text_rgb_for_layer = text_rgb
+        # 주간 이미지 생성 시에는 lights_enabled 무시 (야간 합성에서만 조명 효과 적용)
+        # render_combined_signboard는 주간 이미지만 생성하므로 항상 원본 색상 사용
+        text_rgb_for_layer = text_rgb
         
         # 1) 텍스트 앞면(원본 색상 또는 밝게 조정된 색상)
         text_layer_rgba = extract_text_layer(text_to_render, font, text_rgb_for_layer, (width, height), position)
@@ -1340,6 +1337,9 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
                 # 후광 효과: 텍스트 뒤에서 빛나는 효과 (더 강하게)
                 # text_mask를 (H, W) 형태로 변환 (Gaussian blur를 위해)
                 text_mask = text_layer_rgba[:, :, 3].astype(np.float32) / 255.0  # (H, W)
+                
+
+                
                 # 더 넓고 부드러운 blur: 크기 증가, sigma 증가, 3회 적용
                 backlight = safe_gaussian_blur(text_mask, (141, 141), 70)  # (H, W) - 더 넓은 blur
                 backlight = safe_gaussian_blur(backlight, (141, 141), 70)  # 두 번째 blur
@@ -1356,10 +1356,19 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
                 # day_result와 크기 확인 및 리사이즈
                 if day_result.shape[:2] != backlight_glow.shape[:2]:
                     backlight_glow = cv2.resize(backlight_glow, (day_result.shape[1], day_result.shape[0]), interpolation=cv2.INTER_AREA)
-                
-                # 후광을 배경에 더 강하게 합성
-                day_result = day_result.astype(np.float32) + backlight_glow
+                # ============ 수정: text_mask도 크기 조정 ============
+                # text_mask를 day_result 크기에 맞춤
+                if day_result.shape[:2] != text_mask.shape[:2]:
+                    text_mask = cv2.resize(text_mask, (day_result.shape[1], day_result.shape[0]), interpolation=cv2.INTER_AREA)
+
+                # ============ 수정 부분 ============
+                # 글자 영역 제외하고 후광만 적용
+                text_mask_3ch = np.stack([text_mask, text_mask, text_mask], axis=2)
+                backlight_only = backlight_glow * (1 - text_mask_3ch)
+                day_result = day_result.astype(np.float32) + backlight_only
                 day_result = np.clip(day_result, 0, 255).astype(np.uint8)
+                # ==================================
+                
         else:
             # 전후광채널: 주간에는 전광채널처럼 약한 glow 효과 추가
             debug_logger.info(f"[전후광채널 glow] 시작: installation_type={installation_type}, day_result.shape={day_result.shape}")
