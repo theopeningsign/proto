@@ -60,10 +60,8 @@ SIGN_TYPE_MAP = {
     "scasi_frame_bar": ("스카시", "프레임바"),
     "scasi_frame_plate": ("스카시", "전면프레임"),
     # 플렉스
-    "flex_led_frame_plate": ("플렉스_LED", "전면프레임"),
-    "flex_basic_frame_plate": ("플렉스_기본", "전면프레임"),
+    "flex_frame_plate": ("플렉스", "전면프레임"),
     # 하위 호환성: 기존 channel_wall 등도 지원 (전광으로 매핑)
-    "flex_frame_plate": ("플렉스_기본", "전면프레임"),  # 기존 → 기본으로
     "channel_wall": ("전광채널", "맨벽"),
     "channel_frame_bar": ("전광채널", "프레임바"),
     "channel_frame_plate": ("전광채널", "전면프레임"),
@@ -421,11 +419,9 @@ def build_pairs(
                 bg_hex, text_hex = "#6b2d8f", "#ffffff"
 
             try:
-                # Phase1 생성 - 실제 텍스트 사용
-                actual_text = s.get("text", default_text)
-                print(f"  - text: {actual_text}")
+                # Phase1 생성
                 phase1_img = generate_phase1_image(
-                    text=actual_text,
+                    text=default_text,
                     sign_type_key=sign_type_key,
                     bg_color=bg_hex,
                     text_color=text_hex,
