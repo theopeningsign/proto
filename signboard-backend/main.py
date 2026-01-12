@@ -12,6 +12,14 @@ import sys
 import logging
 import os
 
+# AI 브랜딩 시스템 import (선택적 - openai가 없어도 작동)
+try:
+    from ai_branding import AIBrandingSystem
+    AI_BRANDING_AVAILABLE = True
+except ImportError:
+    AI_BRANDING_AVAILABLE = False
+    AIBrandingSystem = None
+
 # 로깅 설정
 logging.basicConfig(
     level=logging.INFO,
@@ -2809,9 +2817,282 @@ async def generate_simulation(
             status_code=500
         )
 
+# AI 브랜딩 시스템 초기화
+if AI_BRANDING_AVAILABLE:
+    try:
+        branding_system = AIBrandingSystem()
+        logger.info("AI 브랜딩 시스템 초기화 완료")
+    except Exception as e:
+        logger.error(f"AI 브랜딩 시스템 초기화 실패: {e}")
+        branding_system = None
+else:
+    branding_system = None
+    logger.warning("AI 브랜딩 시스템을 사용할 수 없습니다 (openai 모듈 없음)")
+
+@app.post("/api/ai-suggest-names")
+async def ai_suggest_names(
+    industry: str = Form(...),
+    mood: str = Form(...),
+    target_customer: str = Form(""),
+    count: int = Form(5)
+):
+    """AI 상호명 제안 엔드포인트"""
+    
+    if not branding_system:
+        return JSONResponse(
+            {"error": "AI 브랜딩 시스템이 초기화되지 않았습니다."},
+            status_code=500
+        )
+    
+    try:
+        logger.info(f"상호명 생성 요청: industry={industry}, mood={mood}")
+        
+        names = branding_system.generate_business_names(
+            industry=industry,
+            mood=mood,
+            target_customer=target_customer,
+            count=count
+        )
+        
+        if not names:
+            return JSONResponse(
+                {"error": "상호명 생성에 실패했습니다."},
+                status_code=500
+            )
+        
+        logger.info(f"상호명 {len(names)}개 생성 완료")
+        
+        return JSONResponse({
+            "success": True,
+            "names": names,
+            "request_info": {
+                "industry": industry,
+                "mood": mood,
+                "target_customer": target_customer,
+                "count": len(names)
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"상호명 생성 오류: {e}")
+        return JSONResponse(
+            {"error": f"상호명 생성 중 오류 발생: {str(e)}"},
+            status_code=500
+        )
+
+@app.post("/api/ai-suggest-style")
+async def ai_suggest_style(
+    business_name: str = Form(...),
+    industry: str = Form(...)
+):
+    """AI 간판 스타일 추천 엔드포인트"""
+    
+    if not branding_system:
+        return JSONResponse(
+            {"error": "AI 브랜딩 시스템이 초기화되지 않았습니다."},
+            status_code=500
+        )
+    
+    try:
+        logger.info(f"스타일 추천 요청: business_name={business_name}, industry={industry}")
+        
+        style = branding_system.suggest_signboard_style(
+            name=business_name,
+            industry=industry
+        )
+        
+        if not style:
+            return JSONResponse(
+                {"error": "스타일 추천에 실패했습니다."},
+                status_code=500
+            )
+        
+        logger.info(f"스타일 추천 완료: {style.get('recommended_style', 'N/A')}")
+        
+        return JSONResponse({
+            "success": True,
+            "style_recommendation": style,
+            "business_name": business_name,
+            "industry": industry
+        })
+        
+    except Exception as e:
+        logger.error(f"스타일 추천 오류: {e}")
+        return JSONResponse(
+            {"error": f"스타일 추천 중 오류 발생: {str(e)}"},
+            status_code=500
+        )
+
+@app.post("/api/ai-suggest-colors")
+async def ai_suggest_colors(
+    business_name: str = Form(...),
+    industry: str = Form(...),
+    mood: str = Form(...)
+):
+    """AI 브랜드 색상 추천 엔드포인트"""
+    
+    if not branding_system:
+        return JSONResponse(
+            {"error": "AI 브랜딩 시스템이 초기화되지 않았습니다."},
+            status_code=500
+        )
+    
+    try:
+        logger.info(f"색상 추천 요청: business_name={business_name}")
+        
+        colors = branding_system.generate_brand_colors(
+            business_name=business_name,
+            industry=industry,
+            mood=mood
+        )
+        
+        if not colors:
+            return JSONResponse(
+                {"error": "색상 추천에 실패했습니다."},
+                status_code=500
+            )
+        
+        logger.info(f"색상 추천 완료")
+        
+        return JSONResponse({
+            "success": True,
+            "color_recommendation": colors,
+            "business_name": business_name,
+            "industry": industry,
+            "mood": mood
+        })
+        
+    except Exception as e:
+        logger.error(f"색상 추천 오류: {e}")
+        return JSONResponse(
+            {"error": f"색상 추천 중 오류 발생: {str(e)}"},
+            status_code=500
+        )
+
+@app.post("/api/ai-branding-complete")
+async def ai_branding_complete(
+    industry: str = Form(...),
+    mood: str = Form(...),
+    target_customer: str = Form(""),
+    business_name: str = Form(...)
+):
+    """완전한 AI 브랜딩 패키지 (선택된 상호명 + 색상)
+
+    프론트엔드에서 이미 선택된 상호명(business_name)을 보내주면,
+    해당 이름에 맞는 색상만 추천한다.
+    (이전에 하던 것처럼 백엔드에서 상호명을 다시 생성하지 않는다.)
+    """
+    
+    if not branding_system:
+        return JSONResponse(
+            {"error": "AI 브랜딩 시스템이 초기화되지 않았습니다."},
+            status_code=500
+        )
+    
+    try:
+        selected_name = business_name.strip()
+        if not selected_name:
+            return JSONResponse(
+                {"error": "유효하지 않은 상호명입니다."},
+                status_code=400
+            )
+        
+        logger.info(f"완전 브랜딩 요청: industry={industry}, mood={mood}, name={selected_name}")
+        
+        # 색상 추천만 수행
+        colors = branding_system.generate_brand_colors(
+            business_name=selected_name,
+            industry=industry,
+            mood=mood
+        )
+        
+        logger.info(f"완전 브랜딩 완료: {selected_name}")
+        
+        return JSONResponse({
+            "success": True,
+            "branding_package": {
+                "business_name": selected_name,
+                "color_recommendation": colors,
+                "industry": industry,
+                "mood": mood,
+                "target_customer": target_customer
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"완전 브랜딩 오류: {e}")
+        return JSONResponse(
+            {"error": f"브랜딩 패키지 생성 중 오류 발생: {str(e)}"},
+            status_code=500
+        )
+
+@app.post("/api/ai-generate-logo")
+async def ai_generate_logo(
+    business_name: str = Form(...),
+    industry: str = Form(...),
+    mood: str = Form(""),
+    primary_color: str = Form("#000000"),
+    text_color: str = Form("#FFFFFF"),
+    accent_color: str = Form("#FF00FF"),
+):
+    """DALL-E 3를 사용한 간판용 로고 생성 엔드포인트"""
+
+    if not branding_system:
+        return JSONResponse(
+            {"error": "AI 브랜딩 시스템이 초기화되지 않았습니다."},
+            status_code=500,
+        )
+
+    try:
+        colors = {
+            "primary_color": primary_color,
+            "text_color": text_color,
+            "accent_color": accent_color,
+        }
+
+        logo = branding_system.generate_logo(
+            business_name=business_name,
+            industry=industry,
+            mood=mood,
+            colors=colors,
+        )
+
+        if not logo:
+            return JSONResponse(
+                {"error": "로고 생성에 실패했습니다."},
+                status_code=500,
+            )
+
+        return JSONResponse(
+            {
+                "success": True,
+                "logo": logo,
+                "business_name": business_name,
+                "industry": industry,
+                "mood": mood,
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"로고 생성 오류: {e}")
+        return JSONResponse(
+            {"error": f"로고 생성 중 오류 발생: {str(e)}"},
+            status_code=500,
+        )
+
 @app.get("/")
 async def root():
-    return {"message": "Signboard Simulation API"}
+    return {
+        "message": "Signboard Simulation API",
+        "ai_branding_available": branding_system is not None,
+        "endpoints": {
+            "ai_suggest_names": "/api/ai-suggest-names",
+            "ai_suggest_style": "/api/ai-suggest-style", 
+            "ai_suggest_colors": "/api/ai-suggest-colors",
+            "ai_branding_complete": "/api/ai-branding-complete",
+            "generate_simulation": "/api/generate-simulation"
+        }
+    }
 
 if __name__ == "__main__":
     import os

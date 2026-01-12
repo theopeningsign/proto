@@ -329,6 +329,7 @@ def build_pairs(
     real_root: Path,
     output_root: Path,
     labels_path: Path,
+    split_ratio: float,
     default_text: str = "간판",
     use_v2_extractor: bool = False,
 ) -> None:
@@ -367,128 +368,107 @@ def build_pairs(
         print("[WARN] 사용할 수 있는 실제 사진이 없습니다.")
         return
 
+    # 셔플 + train/test 분리
+    random.seed(42)
+    random.shuffle(resolved_samples)
+
     total = len(resolved_samples)
-    print(f"[INFO] 총 {total}개 데이터를 train 폴더에 저장합니다.")
+    train_count = int(total * split_ratio)
+    train_samples = resolved_samples[:train_count]
+    test_samples = resolved_samples[train_count:]
 
-    # 출력 디렉토리 생성 (train만)
-    (output_root / "train" / "input").mkdir(parents=True, exist_ok=True)
+    print(
+        f"[INFO] 총 {total}개 → train {len(train_samples)}개, test {len(test_samples)}개 (split={split_ratio})"
+    )
+
+    # 출력 디렉토리 생성
+    for subset in ["train", "test"]:
+        (output_root / subset / "input").mkdir(parents=True, exist_ok=True)
+        (output_root / subset / "target").mkdir(parents=True, exist_ok=True)
 
     metadata: Dict[str, Dict] = {}
-    
-    # 기존 파일 확인하여 다음 번호부터 시작
-    train_input_dir = output_root / "train" / "input"
-    existing_files = list(train_input_dir.glob("*.png")) if train_input_dir.exists() else []
-    
-    # 기존 메타데이터 확인
-    meta_path = output_root / "pairs_metadata.json"
-    start_index = 0
-    if meta_path.exists():
-        try:
-            with meta_path.open("r", encoding="utf-8") as f:
-                existing_metadata = json.load(f)
-            if existing_metadata:
-                # 기존 pair_id 중 최대값 찾기
-                max_id = max(int(k) for k in existing_metadata.keys() if k.isdigit())
-                start_index = max_id
-        except:
-            start_index = 0
-    
-    # 파일명에서도 최대값 확인
-    if existing_files:
-        file_max_id = 0
-        for f in existing_files:
-            try:
-                file_id = int(f.stem)
-                file_max_id = max(file_max_id, file_id)
-            except ValueError:
+
+    def process_subset(subset_name: str, subset_samples: List[Dict], start_index: int) -> int:
+        index = start_index
+        for s in subset_samples:
+            index += 1
+            pair_id = f"{index:04d}"
+
+            sign_type_key = s.get("sign_type_key") or s.get("sign_type")  # 하위 호환성
+            time_key = s.get("time", "day")
+            real_path: Path = s["real_path"]
+
+            print(f"\n[{subset_name.upper()}] [{pair_id}] {real_path.name}")
+            print(f"  - sign_type_key={sign_type_key}, time={time_key}")
+
+            # 실제 이미지 로드
+            real_img = cv2.imread(str(real_path))
+            if real_img is None:
+                print(f"  [WARN] 실제 사진 로드 실패, 스킵: {real_path}")
                 continue
-        start_index = max(start_index, file_max_id)
-    
-    print(f"\n[INFO] 기존 파일 확인: 최대 pair_id = {start_index}, 다음 번호부터 시작: {start_index + 1}")
-    
-    # 기존 메타데이터 로드
-    metadata: Dict[str, Dict] = {}
-    if meta_path.exists():
-        try:
-            with meta_path.open("r", encoding="utf-8") as f:
-                metadata = json.load(f)
-        except:
-            metadata = {}
-    
-    # 모든 샘플을 train에 저장
-    print("\n[INFO] Pair 생성 시작...")
-    current_index = start_index
-    for s in resolved_samples:
-        current_index += 1
-        pair_id = f"{current_index:04d}"
 
-        sign_type_key = s.get("sign_type_key") or s.get("sign_type")  # 하위 호환성
-        time_key = s.get("time", "day")
-        real_path: Path = s["real_path"]
+            try:
+                # 색상 추출 (v2 선택 가능)
+                if use_v2_extractor:
+                    bg_hex, text_hex = extract_colors_v2(real_path)
+                else:
+                    bg_hex, text_hex = extract_colors(real_path)
+                    print(f"  - colors: bg={bg_hex}, text={text_hex}")
+            except Exception as e:
+                print(f"  [WARN] 색상 추출 실패({e}), 기본 색상 사용")
+                bg_hex, text_hex = "#6b2d8f", "#ffffff"
 
-        print(f"\n[TRAIN] [{pair_id}] {real_path.name}")
-        print(f"  - sign_type_key={sign_type_key}, time={time_key}")
+            try:
+                # Phase1 생성
+                phase1_img = generate_phase1_image(
+                    text=default_text,
+                    sign_type_key=sign_type_key,
+                    bg_color=bg_hex,
+                    text_color=text_hex,
+                    width=512,
+                    height=512,
+                )
+            except Exception as e:
+                print(f"  [ERROR] Phase1 생성 실패, 스킵: {e}")
+                continue
 
-        # 실제 이미지 로드
-        real_img = cv2.imread(str(real_path))
-        if real_img is None:
-            print(f"  [WARN] 실제 사진 로드 실패, 스킵: {real_path}")
-            continue
+            # 전처리: 중앙 크롭 + 리사이즈 (실제/Phase1 모두)
+            real_cropped = center_crop_and_resize(real_img, size=512)
+            phase1_cropped = center_crop_and_resize(phase1_img, size=512)
 
-        try:
-            # 색상 추출 (v2 선택 가능)
-            if use_v2_extractor:
-                bg_hex, text_hex = extract_colors_v2(real_path)
-            else:
-                bg_hex, text_hex = extract_colors(real_path)
-                print(f"  - colors: bg={bg_hex}, text={text_hex}")
-        except Exception as e:
-            print(f"  [WARN] 색상 추출 실패({e}), 기본 색상 사용")
-            bg_hex, text_hex = "#6b2d8f", "#ffffff"
+            # 저장 경로
+            subset_dir = output_root / subset_name
+            input_path = subset_dir / "input" / f"{pair_id}.png"
+            target_path = subset_dir / "target" / f"{pair_id}.jpg"
 
-        try:
-            # Phase1 생성
-            phase1_img = generate_phase1_image(
-                text=default_text,
-                sign_type_key=sign_type_key,
-                bg_color=bg_hex,
-                text_color=text_hex,
-                width=512,
-                height=512,
-            )
-        except Exception as e:
-            print(f"  [ERROR] Phase1 생성 실패, 스킵: {e}")
-            continue
+            # 저장
+            cv2.imwrite(str(input_path), phase1_cropped)
+            cv2.imwrite(str(target_path), real_cropped)
 
-        # 전처리: 중앙 크롭 + 리사이즈 (실제/Phase1 모두)
-        real_cropped = center_crop_and_resize(real_img, size=512)
-        phase1_cropped = center_crop_and_resize(phase1_img, size=512)
+            print(f"  - saved input : {input_path.relative_to(output_root)}")
+            print(f"  - saved target: {target_path.relative_to(output_root)}")
 
-        # ==================== 수정: CG 이미지와 실제 사진을 가로로 이어붙여서 저장 ====================
-        # 두 이미지를 가로로 결합 (왼쪽: CG 이미지, 오른쪽: 실제 사진)
-        # 최종 해상도: 512 x 1024 (가로 x 세로)
-        combined_image = np.hstack([phase1_cropped, real_cropped])
+            # 메타데이터 기록 (pair_id 기준)
+            metadata[pair_id] = {
+                "sign_type_key": sign_type_key,
+                "sign_type": s.get("sign_type"),
+                "installation_type": s.get("installation_type"),
+                "time": time_key,
+                "bg_color": bg_hex,
+                "text_color": text_hex,
+                "real_photo": str(real_path.relative_to(labels_path.parent)),
+                "phase1_input": str(input_path.relative_to(output_root)),
+                "phase1_target": str(target_path.relative_to(output_root)),
+            }
 
-        # 저장 경로 (결합된 이미지 하나로 저장)
-        combined_path = (output_root / "train" / "input" / f"{pair_id}.png")
+        return index
 
-        # 저장
-        cv2.imwrite(str(combined_path), combined_image)
+    print("\n[INFO] Train 세트 생성 시작...")
+    current_index = 0
+    current_index = process_subset("train", train_samples, current_index)
 
-        print(f"  - saved combined: {combined_path.relative_to(output_root)} (512x1024, CG+실제 결합)")
-
-        # 메타데이터 기록 (pair_id 기준)
-        metadata[pair_id] = {
-            "sign_type_key": sign_type_key,
-            "sign_type": s.get("sign_type"),
-            "installation_type": s.get("installation_type"),
-            "time": time_key,
-            "bg_color": bg_hex,
-            "text_color": text_hex,
-            "real_photo": str(real_path.relative_to(labels_path.parent)),
-            "combined_image": str(combined_path.relative_to(output_root)),  # 결합된 이미지 경로
-        }
-        # ====================================================================================
+    print("\n[INFO] Test 세트 생성 시작...")
+    current_index = process_subset("test", test_samples, current_index)
 
     # 메타데이터 저장
     meta_path = output_root / "pairs_metadata.json"
@@ -524,6 +504,13 @@ def parse_args() -> argparse.Namespace:
         help="labels.json 경로 (기본: phase2_data/labels.json)",
     )
     parser.add_argument(
+        "--split",
+        type=float,
+        required=False,
+        default=0.8,
+        help="train 비율 (0~1, 기본: 0.8)",
+    )
+    parser.add_argument(
         "--use-v2-extractor",
         action="store_true",
         help="개선된 색상 추출 알고리즘 (v2) 사용",
@@ -547,8 +534,8 @@ def main() -> None:
     print(f"  - real_root : {real_root}")
     print(f"  - output_root: {output_root}")
     print(f"  - labels     : {labels_path}")
+    print(f"  - split      : {args.split}")
     print(f"  - color_extractor: {'v2 (개선)' if args.use_v2_extractor else 'v1 (기본)'}")
-    print(f"  - 모든 데이터를 train 폴더에 저장합니다.")
     
     # labels.json 파일 존재 여부 확인
     if not labels_path.exists():
@@ -573,9 +560,13 @@ def main() -> None:
         real_root=real_root,
         output_root=output_root,
         labels_path=labels_path,
+        split_ratio=args.split,
         use_v2_extractor=args.use_v2_extractor,
     )
 
 
 if __name__ == "__main__":
     main()
+
+
+

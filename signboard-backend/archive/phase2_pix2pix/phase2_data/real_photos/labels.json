@@ -1,0 +1,62 @@
+{
+  "channel_front_wall": {
+    "day": [],
+    "night": []
+  },
+  "channel_front_frame_bar": {
+    "day": [],
+    "night": []
+  },
+  "channel_front_frame_plate": {
+    "day": [],
+    "night": []
+  },
+  "channel_back_wall": {
+    "day": [
+      {
+        "id": "channel_back_wall_channel_back_wall_01_day_day",
+        "real_photo": "real_photos\\channel_back_wall\\day\\channel_back_wall_01_day.JPG",
+        "sign_type": "channel",
+        "installation_type": "back_wall",
+        "sign_type_key": "channel_back_wall",
+        "time": "day",
+        "date_labeled": "2025-12-29 18:42:55",
+        "original_filename": "01.JPG",
+        "lights_enabled": false,
+        "cropped_photo": "cropped_photos/01_cropped.jpg",
+        "text": "옹글",
+        "crop_region": {
+          "x": 96,
+          "y": 40,
+          "width": 238,
+          "height": 205
+        }
+      }
+    ],
+    "night": []
+  },
+  "channel_back_frame_bar": {
+    "day": [],
+    "night": []
+  },
+  "channel_back_frame_plate": {
+    "day": [],
+    "night": []
+  },
+  "scasi_wall": {
+    "day": [],
+    "night": []
+  },
+  "scasi_frame_bar": {
+    "day": [],
+    "night": []
+  },
+  "scasi_frame_plate": {
+    "day": [],
+    "night": []
+  },
+  "flex_frame_plate": {
+    "day": [],
+    "night": []
+  }
+}

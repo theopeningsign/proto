@@ -1,9 +1,16 @@
-{
-  "cells": [
-    {
-      "cell_type": "markdown",
-      "metadata": {},
-      "source": [
+"""
+Colab 노트북 생성 스크립트
+"""
+import json
+
+# 노트북 셀 정의
+cells = []
+
+# Markdown: 헤더
+cells.append({
+    "cell_type": "markdown",
+    "metadata": {},
+    "source": [
         "# 🎨 간판 Pix2Pix 학습 노트북\n",
         "\n",
         "**목적:** Phase 1 CG 이미지를 실제 사진처럼 변환하는 모델 학습\n",
@@ -11,32 +18,36 @@
         "**데이터:** paired_data (INPUT: CG 간판, TARGET: 실제 사진)\n",
         "\n",
         "---"
-      ]
-    },
-    {
-      "cell_type": "markdown",
-      "metadata": {},
-      "source": [
+    ]
+})
+
+# Markdown: 사전 준비
+cells.append({
+    "cell_type": "markdown",
+    "metadata": {},
+    "source": [
         "## 📋 사전 준비\n",
         "\n",
         "1. ✅ Google Drive에 데이터 업로드 완료 (`Colab_Signboard_Data` 폴더)\n",
         "2. ✅ 이 노트북을 Google Colab에서 열기\n",
         "3. ✅ GPU 런타임 사용 확인 (런타임 → 런타임 유형 변경 → GPU)"
-      ]
-    },
-    {
-      "cell_type": "markdown",
-      "metadata": {},
-      "source": [
-        "## 1️⃣ 환경 확인 및 GPU 설정"
-      ]
-    },
-    {
-      "cell_type": "code",
-      "execution_count": null,
-      "metadata": {},
-      "outputs": [],
-      "source": [
+    ]
+})
+
+# Markdown: 1. 환경 확인
+cells.append({
+    "cell_type": "markdown",
+    "metadata": {},
+    "source": ["## 1️⃣ 환경 확인 및 GPU 설정"]
+})
+
+# Code: GPU 확인
+cells.append({
+    "cell_type": "code",
+    "execution_count": None,
+    "metadata": {},
+    "outputs": [],
+    "source": [
         "# GPU 확인\n",
         "import torch\n",
         "print(f\"PyTorch 버전: {torch.__version__}\")\n",
@@ -46,21 +57,23 @@
         "    print(f\"CUDA 버전: {torch.version.cuda}\")\n",
         "else:\n",
         "    print(\"⚠️ GPU가 감지되지 않습니다. 런타임을 GPU로 변경하세요.\")"
-      ]
-    },
-    {
-      "cell_type": "markdown",
-      "metadata": {},
-      "source": [
-        "## 2️⃣ Google Drive 연결"
-      ]
-    },
-    {
-      "cell_type": "code",
-      "execution_count": null,
-      "metadata": {},
-      "outputs": [],
-      "source": [
+    ]
+})
+
+# Markdown: 2. Google Drive 연결
+cells.append({
+    "cell_type": "markdown",
+    "metadata": {},
+    "source": ["## 2️⃣ Google Drive 연결"]
+})
+
+# Code: Drive 마운트
+cells.append({
+    "cell_type": "code",
+    "execution_count": None,
+    "metadata": {},
+    "outputs": [],
+    "source": [
         "# Google Drive 마운트\n",
         "from google.colab import drive\n",
         "drive.mount('/content/drive')\n",
@@ -71,35 +84,36 @@
         "\n",
         "if os.path.exists(DATA_PATH):\n",
         "    print(f\"✅ 데이터 경로 확인: {DATA_PATH}\")\n",
-        "    # 파일 개수 확인 (결합된 이미지만 확인)\n",
+        "    # 파일 개수 확인\n",
         "    train_input_count = len([f for f in os.listdir(os.path.join(DATA_PATH, 'train', 'input')) if f.endswith(('.png', '.jpg'))])\n",
-        "    test_input_count = len([f for f in os.listdir(os.path.join(DATA_PATH, 'test', 'input')) if f.endswith(('.png', '.jpg'))]) if os.path.exists(os.path.join(DATA_PATH, 'test', 'input')) else 0\n",
+        "    train_target_count = len([f for f in os.listdir(os.path.join(DATA_PATH, 'train', 'target')) if f.endswith(('.png', '.jpg'))])\n",
+        "    test_input_count = len([f for f in os.listdir(os.path.join(DATA_PATH, 'test', 'input')) if f.endswith(('.png', '.jpg'))])\n",
+        "    test_target_count = len([f for f in os.listdir(os.path.join(DATA_PATH, 'test', 'target')) if f.endswith(('.png', '.jpg'))])\n",
         "    print(f\"\\n📊 데이터 통계:\")\n",
-        "    print(f\"  Train: {train_input_count} 개 (결합된 이미지: 512x1024)\")\n",
-        "    if test_input_count > 0:\n",
-        "        print(f\"  Test: {test_input_count} 개 (선택사항)\")\n",
-        "    else:\n",
-        "        print(f\"  Test: 없음 (모든 데이터가 train에 저장됨)\")\n",
+        "    print(f\"  Train: {train_input_count} input, {train_target_count} target\")\n",
+        "    print(f\"  Test: {test_input_count} input, {test_target_count} target\")\n",
         "else:\n",
         "    print(f\"❌ 데이터 경로를 찾을 수 없습니다: {DATA_PATH}\")\n",
         "    print(\"\\n📋 다음을 확인하세요:\")\n",
         "    print(\"  1. Google Drive에 'Colab_Signboard_Data' 폴더가 있는지\")\n",
-        "    print(\"  2. 폴더 구조가 올바른지 (train/input 필수)\")"
-      ]
-    },
-    {
-      "cell_type": "markdown",
-      "metadata": {},
-      "source": [
-        "## 3️⃣ Pix2Pix 저장소 클론 및 설치"
-      ]
-    },
-    {
-      "cell_type": "code",
-      "execution_count": null,
-      "metadata": {},
-      "outputs": [],
-      "source": [
+        "    print(\"  2. 폴더 구조가 올바른지 (train/input, train/target, test/input, test/target)\")"
+    ]
+})
+
+# Markdown: 3. Pix2Pix 설치
+cells.append({
+    "cell_type": "markdown",
+    "metadata": {},
+    "source": ["## 3️⃣ Pix2Pix 저장소 클론 및 설치"]
+})
+
+# Code: Pix2Pix 설치
+cells.append({
+    "cell_type": "code",
+    "execution_count": None,
+    "metadata": {},
+    "outputs": [],
+    "source": [
         "# 작업 디렉토리로 이동\n",
         "%cd /content\n",
         "\n",
@@ -115,21 +129,23 @@
         "# 필요한 라이브러리 설치\n",
         "!pip install -q dominate visdom\n",
         "print(\"✅ 필요한 라이브러리 설치 완료\")"
-      ]
-    },
-    {
-      "cell_type": "markdown",
-      "metadata": {},
-      "source": [
-        "## 4️⃣ 데이터를 Pix2Pix 형식으로 준비"
-      ]
-    },
-    {
-      "cell_type": "code",
-      "execution_count": null,
-      "metadata": {},
-      "outputs": [],
-      "source": [
+    ]
+})
+
+# Markdown: 4. 데이터 준비
+cells.append({
+    "cell_type": "markdown",
+    "metadata": {},
+    "source": ["## 4️⃣ 데이터를 Pix2Pix 형식으로 준비"]
+})
+
+# Code: 데이터 준비
+cells.append({
+    "cell_type": "code",
+    "execution_count": None,
+    "metadata": {},
+    "outputs": [],
+    "source": [
         "# Pix2Pix 데이터 형식으로 변환\n",
         "import shutil\n",
         "\n",
@@ -143,13 +159,13 @@
         "os.makedirs(f'{DATASET_DIR}/test/B', exist_ok=True)\n",
         "\n",
         "# 심볼릭 링크 생성 (복사 대신 링크 사용 - 빠름)\n",
-        "# Train - 결합된 이미지(512x1024)를 그대로 사용 (pix2pix aligned 모드가 자동으로 반으로 나눔)\n",
+        "# Train\n",
         "!ln -s \"{DATA_PATH}/train/input/\"* \"{DATASET_DIR}/train/A/\" 2>/dev/null || true\n",
-        "!ln -s \"{DATA_PATH}/train/input/\"* \"{DATASET_DIR}/train/B/\" 2>/dev/null || true\n",
+        "!ln -s \"{DATA_PATH}/train/target/\"* \"{DATASET_DIR}/train/B/\" 2>/dev/null || true\n",
         "\n",
         "# Test\n",
         "!ln -s \"{DATA_PATH}/test/input/\"* \"{DATASET_DIR}/test/A/\" 2>/dev/null || true\n",
-        "!ln -s \"{DATA_PATH}/test/input/\"* \"{DATASET_DIR}/test/B/\" 2>/dev/null || true\n",
+        "!ln -s \"{DATA_PATH}/test/target/\"* \"{DATASET_DIR}/test/B/\" 2>/dev/null || true\n",
         "\n",
         "# 확인\n",
         "train_a_count = len([f for f in os.listdir(f'{DATASET_DIR}/train/A') if not f.startswith('.')])\n",
@@ -160,62 +176,74 @@
         "print(f\"✅ 데이터 준비 완료:\")\n",
         "print(f\"  Train: A={train_a_count}, B={train_b_count}\")\n",
         "print(f\"  Test: A={test_a_count}, B={test_b_count}\")"
-      ]
-    },
-    {
-      "cell_type": "markdown",
-      "metadata": {},
-      "source": [
-        "## 5️⃣ 데이터 샘플 확인"
-      ]
-    },
-    {
-      "cell_type": "code",
-      "execution_count": null,
-      "metadata": {},
-      "outputs": [],
-      "source": [
-        "# 결합된 이미지 샘플 확인 (512x1024)\n",
+    ]
+})
+
+# Markdown: 5. 샘플 확인
+cells.append({
+    "cell_type": "markdown",
+    "metadata": {},
+    "source": ["## 5️⃣ 데이터 샘플 확인"]
+})
+
+# Code: 샘플 확인
+cells.append({
+    "cell_type": "code",
+    "execution_count": None,
+    "metadata": {},
+    "outputs": [],
+    "source": [
+        "# 샘플 이미지 확인\n",
         "from PIL import Image\n",
         "import matplotlib.pyplot as plt\n",
         "\n",
-        "train_input_dir = f'{DATA_PATH}/train/input'\n",
-        "if os.path.exists(train_input_dir):\n",
-        "    sample_files = sorted([f for f in os.listdir(train_input_dir) if f.endswith(('.png', '.jpg')) and not f.startswith('.')])\n",
+        "def show_sample(train_dir, sample_idx=0):\n",
+        "    a_files = sorted([f for f in os.listdir(f'{train_dir}/A') if f.endswith(('.png', '.jpg')) and not f.startswith('.')])\n",
+        "    b_files = sorted([f for f in os.listdir(f'{train_dir}/B') if f.endswith(('.png', '.jpg')) and not f.startswith('.')])\n",
         "    \n",
-        "    if sample_files:\n",
-        "        sample_path = os.path.join(train_input_dir, sample_files[0])\n",
-        "        img = Image.open(sample_path)\n",
+        "    if sample_idx < len(a_files) and sample_idx < len(b_files):\n",
+        "        a_path = os.path.join(train_dir, 'A', a_files[sample_idx])\n",
+        "        b_path = os.path.join(train_dir, 'B', b_files[sample_idx])\n",
         "        \n",
-        "        print(f\"📸 결합된 이미지 샘플: {sample_files[0]}\")\n",
-        "        print(f\"  크기: {img.size[0]}x{img.size[1]} (가로x세로)\")\n",
-        "        print(f\"  왼쪽: CG 이미지 (512x512), 오른쪽: 실제 사진 (512x512)\")\n",
+        "        fig, axes = plt.subplots(1, 2, figsize=(12, 6))\n",
         "        \n",
-        "        plt.figure(figsize=(12, 6))\n",
-        "        plt.imshow(img)\n",
-        "        plt.title(f'결합된 이미지 샘플 - {sample_files[0]}', fontsize=14)\n",
-        "        plt.axis('off')\n",
+        "        img_a = Image.open(a_path)\n",
+        "        axes[0].imshow(img_a)\n",
+        "        axes[0].set_title(f'INPUT (CG) - {a_files[sample_idx]}', fontsize=12)\n",
+        "        axes[0].axis('off')\n",
+        "        \n",
+        "        img_b = Image.open(b_path)\n",
+        "        axes[1].imshow(img_b)\n",
+        "        axes[1].set_title(f'TARGET (실제 사진) - {b_files[sample_idx]}', fontsize=12)\n",
+        "        axes[1].axis('off')\n",
+        "        \n",
         "        plt.tight_layout()\n",
         "        plt.show()\n",
         "    else:\n",
-        "        print(\"⚠️ 샘플 이미지를 찾을 수 없습니다.\")\n",
-        "else:\n",
-        "    print(\"⚠️ train/input 폴더를 찾을 수 없습니다.\")"
-      ]
-    },
-    {
-      "cell_type": "markdown",
-      "metadata": {},
-      "source": [
-        "## 6️⃣ 학습 시작"
-      ]
-    },
-    {
-      "cell_type": "code",
-      "execution_count": null,
-      "metadata": {},
-      "outputs": [],
-      "source": [
+        "        print(f\"❌ 샘플 인덱스 {sample_idx}를 찾을 수 없습니다.\")\n",
+        "\n",
+        "print(\"📸 Train 데이터 샘플:\")\n",
+        "show_sample(f'{DATASET_DIR}/train', 0)\n",
+        "\n",
+        "print(\"\\n📸 Test 데이터 샘플:\")\n",
+        "show_sample(f'{DATASET_DIR}/test', 0)"
+    ]
+})
+
+# Markdown: 6. 학습 시작
+cells.append({
+    "cell_type": "markdown",
+    "metadata": {},
+    "source": ["## 6️⃣ 학습 시작"]
+})
+
+# Code: 학습 파라미터
+cells.append({
+    "cell_type": "code",
+    "execution_count": None,
+    "metadata": {},
+    "outputs": [],
+    "source": [
         "# 학습 파라미터 설정\n",
         "MODEL_NAME = 'signboard_pix2pix_v1'\n",
         "EPOCHS = 100\n",
@@ -229,14 +257,16 @@
         "print(f\"  데이터셋: {DATASET_NAME}\")\n",
         "print(f\"\\n⏱️  예상 소요 시간: 2-4시간 (GPU 기준)\")\n",
         "print(f\"\\n💡 중간 결과는 checkpoints/{MODEL_NAME}/web/images/ 에 저장됩니다.\")"
-      ]
-    },
-    {
-      "cell_type": "code",
-      "execution_count": null,
-      "metadata": {},
-      "outputs": [],
-      "source": [
+    ]
+})
+
+# Code: 학습 실행
+cells.append({
+    "cell_type": "code",
+    "execution_count": None,
+    "metadata": {},
+    "outputs": [],
+    "source": [
         "# 학습 실행 (✅ 수정됨: 올바른 이미지 크기 설정 추가!)\n",
         "!python train.py --dataroot ./datasets/{DATASET_NAME} --name {MODEL_NAME} --model pix2pix --direction AtoB --dataset_mode aligned --load_size 512 --crop_size 512 --preprocess none --batch_size {BATCH_SIZE} --n_epochs {EPOCHS} --n_epochs_decay {EPOCHS_DECAY}\n",
         "\n",
@@ -246,37 +276,23 @@
         "print('  --crop_size 512: 크롭 없이 전체 이미지 사용')\n",
         "print('  --preprocess none: 추가 전처리 없음')\n",
         "print('🎯 이제 이미지가 반으로 잘리지 않습니다!')"
-      ]
-    },
-    {
-      "cell_type": "markdown",
-      "metadata": {},
-      "source": [
-        "## 7️⃣ 중간 결과 확인 (학습 중간에 실행 가능)"
-      ]
-    },
-    {
-      "cell_type": "markdown",
-      "metadata": {},
-      "source": [
-        "\n"
-      ]
-    },
-    {
-      "cell_type": "code",
-      "execution_count": null,
-      "metadata": {},
-      "outputs": [],
-      "source": [
-        "\n"
-      ]
-    },
-    {
-      "cell_type": "code",
-      "execution_count": null,
-      "metadata": {},
-      "outputs": [],
-      "source": [
+    ]
+})
+
+# Markdown: 7. 중간 결과
+cells.append({
+    "cell_type": "markdown",
+    "metadata": {},
+    "source": ["## 7️⃣ 중간 결과 확인 (학습 중간에 실행 가능)"]
+})
+
+# Code: 중간 결과 확인
+cells.append({
+    "cell_type": "code",
+    "execution_count": None,
+    "metadata": {},
+    "outputs": [],
+    "source": [
         "# 가장 최근 epoch의 결과 확인\n",
         "result_dir = f'/content/pytorch-CycleGAN-and-pix2pix/checkpoints/{MODEL_NAME}/web/images'\n",
         "\n",
@@ -325,40 +341,44 @@
         "        print(\"⚠️ 결과 이미지가 아직 생성되지 않았습니다.\")\n",
         "else:\n",
         "    print(f\"⚠️ 결과 디렉토리를 찾을 수 없습니다: {result_dir}\")"
-      ]
-    },
-    {
-      "cell_type": "markdown",
-      "metadata": {},
-      "source": [
-        "## 8️⃣ 테스트 실행 (학습 완료 후)"
-      ]
-    },
-    {
-      "cell_type": "code",
-      "execution_count": null,
-      "metadata": {},
-      "outputs": [],
-      "source": [
+    ]
+})
+
+# Markdown: 8. 테스트
+cells.append({
+    "cell_type": "markdown",
+    "metadata": {},
+    "source": ["## 8️⃣ 테스트 실행 (학습 완료 후)"]
+})
+
+# Code: 테스트 실행
+cells.append({
+    "cell_type": "code",
+    "execution_count": None,
+    "metadata": {},
+    "outputs": [],
+    "source": [
         "# 테스트 실행 (✅ 수정됨: 올바른 이미지 크기 설정 추가!)\n",
         "!python test.py --dataroot ./datasets/{DATASET_NAME} --name {MODEL_NAME} --model pix2pix --direction AtoB --dataset_mode aligned --load_size 512 --crop_size 512 --preprocess none --epoch latest\n",
         "\n",
         "print('🔧 테스트 옵션도 동일하게 수정됨!')"
-      ]
-    },
-    {
-      "cell_type": "markdown",
-      "metadata": {},
-      "source": [
-        "## 9️⃣ 테스트 결과 확인"
-      ]
-    },
-    {
-      "cell_type": "code",
-      "execution_count": null,
-      "metadata": {},
-      "outputs": [],
-      "source": [
+    ]
+})
+
+# Markdown: 9. 테스트 결과
+cells.append({
+    "cell_type": "markdown",
+    "metadata": {},
+    "source": ["## 9️⃣ 테스트 결과 확인"]
+})
+
+# Code: 테스트 결과 확인
+cells.append({
+    "cell_type": "code",
+    "execution_count": None,
+    "metadata": {},
+    "outputs": [],
+    "source": [
         "# 테스트 결과 이미지 표시\n",
         "test_result_dir = f'/content/pytorch-CycleGAN-and-pix2pix/results/{MODEL_NAME}/test_latest/images'\n",
         "\n",
@@ -394,21 +414,23 @@
         "        print(\"⚠️ 테스트 결과 파일을 찾을 수 없습니다.\")\n",
         "else:\n",
         "    print(f\"⚠️ 테스트 결과 디렉토리를 찾을 수 없습니다: {test_result_dir}\")"
-      ]
-    },
-    {
-      "cell_type": "markdown",
-      "metadata": {},
-      "source": [
-        "## 🔟 모델 다운로드 (선택사항)"
-      ]
-    },
-    {
-      "cell_type": "code",
-      "execution_count": null,
-      "metadata": {},
-      "outputs": [],
-      "source": [
+    ]
+})
+
+# Markdown: 10. 모델 다운로드
+cells.append({
+    "cell_type": "markdown",
+    "metadata": {},
+    "source": ["## 🔟 모델 다운로드 (선택사항)"]
+})
+
+# Code: 모델 다운로드
+cells.append({
+    "cell_type": "code",
+    "execution_count": None,
+    "metadata": {},
+    "outputs": [],
+    "source": [
         "# 학습된 모델을 Google Drive에 저장 (선택사항)\n",
         "checkpoint_dir = f'/content/pytorch-CycleGAN-and-pix2pix/checkpoints/{MODEL_NAME}'\n",
         "drive_save_dir = '/content/drive/MyDrive/Colab_Signboard_Models'\n",
@@ -422,24 +444,34 @@
         "    print(f\"✅ 모델이 {drive_save_dir}에 저장되었습니다.\")\n",
         "else:\n",
         "    print(f\"⚠️ 체크포인트 디렉토리를 찾을 수 없습니다: {checkpoint_dir}\")"
-      ]
-    }
-  ],
-  "metadata": {
-    "accelerator": "GPU",
-    "colab": {
-      "collapsed_sections": [],
-      "name": "pix2pix_training",
-      "provenance": []
+    ]
+})
+
+# 노트북 메타데이터
+notebook = {
+    "cells": cells,
+    "metadata": {
+        "accelerator": "GPU",
+        "colab": {
+            "collapsed_sections": [],
+            "name": "pix2pix_training",
+            "provenance": []
+        },
+        "kernelspec": {
+            "display_name": "Python 3",
+            "name": "python3"
+        },
+        "language_info": {
+            "name": "python"
+        }
     },
-    "kernelspec": {
-      "display_name": "Python 3",
-      "name": "python3"
-    },
-    "language_info": {
-      "name": "python"
-    }
-  },
-  "nbformat": 4,
-  "nbformat_minor": 0
+    "nbformat": 4,
+    "nbformat_minor": 0
 }
+
+# 파일 저장
+with open("pix2pix_training.ipynb", "w", encoding="utf-8") as f:
+    json.dump(notebook, f, ensure_ascii=False, indent=2)
+
+print("노트북 파일 생성 완료: pix2pix_training.ipynb")
+

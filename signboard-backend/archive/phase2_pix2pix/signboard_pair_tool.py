@@ -125,6 +125,14 @@ class PairGeneratorGUI:
             variable=self.v2_extractor_var
         ).grid(row=0, column=0, sticky='w', padx=5, pady=5)
         
+        ttk.Label(options_frame, text="Train/Test 비율:").grid(row=0, column=1, padx=5, pady=5)
+        self.split_var = tk.DoubleVar(value=0.8)
+        split_scale = ttk.Scale(options_frame, from_=0.5, to=0.9, variable=self.split_var, orient='horizontal', length=200)
+        split_scale.grid(row=0, column=2, padx=5, pady=5)
+        self.split_label = ttk.Label(options_frame, text="80%")
+        self.split_label.grid(row=0, column=3, padx=5, pady=5)
+        split_scale.configure(command=lambda v: self.split_label.config(text=f"{float(v)*100:.0f}%"))
+        
         # 상태 표시
         status_frame = ttk.LabelFrame(self.tab1, text="상태", padding="10")
         status_frame.pack(fill='both', expand=True, padx=10, pady=10)
@@ -506,65 +514,46 @@ class PairGeneratorGUI:
         try:
             self.use_v2_extractor = self.v2_extractor_var.get()
             output_root = Path(self.output_path_var.get())
+            split_ratio = self.split_var.get()
             
-            # 출력 폴더 생성 (train만)
-            (output_root / "train" / "input").mkdir(parents=True, exist_ok=True)
+            # 출력 폴더 생성
+            for subset in ["train", "test"]:
+                (output_root / subset / "input").mkdir(parents=True, exist_ok=True)
+                (output_root / subset / "target").mkdir(parents=True, exist_ok=True)
             
-            total = len(self.samples)
-            self.log(f"총 {total}개 데이터를 train 폴더에 저장합니다.")
+            # 샘플 분리
+            import random
+            random.seed(42)
+            shuffled = list(self.samples)
+            random.shuffle(shuffled)
             
-            # 기존 파일 확인하여 다음 번호부터 시작
-            train_input_dir = output_root / "train" / "input"
-            existing_files = list(train_input_dir.glob("*.png")) if train_input_dir.exists() else []
+            total = len(shuffled)
+            train_count = int(total * split_ratio)
+            train_samples = shuffled[:train_count]
+            test_samples = shuffled[train_count:]
             
-            # 기존 메타데이터도 확인
-            meta_path = output_root / "pairs_metadata.json"
-            if meta_path.exists():
-                try:
-                    with meta_path.open("r", encoding="utf-8") as f:
-                        existing_metadata = json.load(f)
-                    # 기존 pair_id 중 최대값 찾기
-                    if existing_metadata:
-                        max_id = max(int(k) for k in existing_metadata.keys() if k.isdigit())
-                        start_pair_id = max_id
-                    else:
-                        start_pair_id = 0
-                except:
-                    start_pair_id = 0
-            else:
-                start_pair_id = 0
+            self.log(f"총 {total}개 → train {len(train_samples)}개, test {len(test_samples)}개")
             
-            # 파일명에서도 최대값 확인
-            if existing_files:
-                file_max_id = 0
-                for f in existing_files:
-                    try:
-                        file_id = int(f.stem)
-                        file_max_id = max(file_max_id, file_id)
-                    except ValueError:
-                        continue
-                start_pair_id = max(start_pair_id, file_max_id)
-            
-            # 다음 번호부터 시작
-            pair_id = start_pair_id
-            self.log(f"기존 파일 확인: 최대 pair_id = {start_pair_id}, 다음 번호부터 시작: {pair_id + 1}")
-            
-            # 메타데이터 로드 (기존 데이터 유지)
+            # 메타데이터
             metadata = {}
-            if meta_path.exists():
-                try:
-                    with meta_path.open("r", encoding="utf-8") as f:
-                        metadata = json.load(f)
-                except:
-                    metadata = {}
+            pair_id = 0
             
-            # 모든 샘플을 train에 저장
-            self.log("Pair 생성 시작...")
-            for s in self.samples:
+            # Train 생성
+            self.log("Train 세트 생성 시작...")
+            for s in train_samples:
                 if not self.is_generating:
                     break
                 pair_id += 1
                 self.generate_single_pair(s, "train", pair_id, output_root, metadata)
+            
+            # Test 생성
+            if self.is_generating:
+                self.log("Test 세트 생성 시작...")
+                for s in test_samples:
+                    if not self.is_generating:
+                        break
+                    pair_id += 1
+                    self.generate_single_pair(s, "test", pair_id, output_root, metadata)
             
             # 메타데이터 저장
             if self.is_generating:
@@ -753,19 +742,15 @@ class PairGeneratorGUI:
     
         phase1_cropped = center_crop_and_resize(phase1_img, size=512)
     
-        # ==================== 수정: CG 이미지와 실제 사진을 가로로 이어붙여서 저장 ====================
-        # 두 이미지를 가로로 결합 (왼쪽: CG 이미지, 오른쪽: 실제 사진)
-        # 최종 해상도: 512 x 1024 (가로 x 세로)
-        combined_image = np.hstack([phase1_cropped, real_cropped])
-        
-        # 저장 (하나의 이미지로 저장)
+        # 저장
         subset_dir = output_root / subset
-        combined_path = subset_dir / "input" / f"{pair_id_str}.png"
-        
-        cv2.imwrite(str(combined_path), combined_image)
-        
-        self.log(f"  저장: {combined_path.name} (512x1024, CG+실제 결합) ({time_key})")
-        # ====================================================================================
+        input_path = subset_dir / "input" / f"{pair_id_str}.png"
+        target_path = subset_dir / "target" / f"{pair_id_str}.jpg"
+    
+        cv2.imwrite(str(input_path), phase1_cropped)
+        cv2.imwrite(str(target_path), real_cropped)
+    
+        self.log(f"  저장: {input_path.name}, {target_path.name} ({time_key})")
     
         # ==================== 수정 7: 메타데이터에 텍스트/크롭 여부 추가 ====================
         metadata[pair_id_str] = {
@@ -777,7 +762,8 @@ class PairGeneratorGUI:
             "bg_color": bg_hex,
             "text_color": text_hex,
             "real_photo": self._get_relative_path(real_path, self.labels_path.parent),
-            "combined_image": str(combined_path.relative_to(output_root)),  # 결합된 이미지 경로
+            "phase1_input": str(input_path.relative_to(output_root)),
+            "phase1_target": str(target_path.relative_to(output_root)),
             "subset": subset,
             "status": "ok",
             "is_cropped": is_cropped,  # ← 추가
@@ -861,39 +847,9 @@ class PairGeneratorGUI:
         meta = self.generated_pairs[self.current_pair_id]
         output_root = Path(self.output_path_var.get())
         
-        # ==================== 수정: 결합된 이미지에서 CG와 실제 사진 분리 ====================
-        # 결합된 이미지 경로 확인 (새 방식) 또는 기존 방식 (하위 호환)
-        if "combined_image" in meta:
-            combined_path = output_root / meta["combined_image"]
-            if combined_path.exists():
-                # 결합된 이미지에서 왼쪽(CG)과 오른쪽(실제) 분리
-                combined_img = cv2.imread(str(combined_path))
-                if combined_img is not None:
-                    h, w = combined_img.shape[:2]
-                    # 왼쪽 절반: CG 이미지
-                    phase1_img = combined_img[:, :w//2]
-                    # 오른쪽 절반: 실제 사진
-                    target_img = combined_img[:, w//2:]
-                    
-                    # PIL Image로 변환하여 표시
-                    phase1_pil = Image.fromarray(cv2.cvtColor(phase1_img, cv2.COLOR_BGR2RGB))
-                    target_pil = Image.fromarray(cv2.cvtColor(target_img, cv2.COLOR_BGR2RGB))
-                    
-                    phase1_pil.thumbnail((400, 400), Image.Resampling.LANCZOS)
-                    target_pil.thumbnail((400, 400), Image.Resampling.LANCZOS)
-                    
-                    phase1_photo = ImageTk.PhotoImage(phase1_pil)
-                    target_photo = ImageTk.PhotoImage(target_pil)
-                    
-                    self.input_label.configure(image=phase1_photo, text="")
-                    self.input_label.image = phase1_photo
-                    self.target_label.configure(image=target_photo, text="")
-                    self.target_label.image = target_photo
-                    return
-        
-        # 기존 방식 (하위 호환): 별도 파일로 저장된 경우
-        target_path = output_root / meta.get("phase1_target", "")
-        input_path = output_root / meta.get("phase1_input", "")
+        # 이미지 로드
+        target_path = output_root / meta["phase1_target"]
+        input_path = output_root / meta["phase1_input"]
         
         if target_path.exists():
             target_img = Image.open(target_path)
@@ -908,7 +864,6 @@ class PairGeneratorGUI:
             input_photo = ImageTk.PhotoImage(input_img)
             self.input_label.configure(image=input_photo, text="")
             self.input_label.image = input_photo
-        # ====================================================================================
         
         # 색상 설정
         self.bg_color_var.set(meta.get("bg_color", "#6b2d8f"))
@@ -1021,7 +976,6 @@ class PairGeneratorGUI:
         is_channel = sign_type_key.startswith("channel_")
         lights_enabled = self.lights_enabled_var.get() if is_channel else False
         text = meta.get("text", "간판")
-        is_cropped = meta.get("is_cropped", False)
 
         try:
             # Phase1 재생성
@@ -1036,88 +990,8 @@ class PairGeneratorGUI:
             )
             
             phase1_cropped = center_crop_and_resize(phase1_img, size=512)
-            
-            # 실제 사진(target) 다시 로드
-            if "combined_image" in meta:
-                # 새로운 방식: 결합된 이미지에서 실제 사진 부분 추출
-                combined_path = output_root / meta["combined_image"]
-                if combined_path.exists():
-                    combined_img = cv2.imread(str(combined_path))
-                    if combined_img is not None:
-                        h, w = combined_img.shape[:2]
-                        real_cropped = combined_img[:, w//2:]  # 오른쪽 절반 (실제 사진)
-                    else:
-                        # 원본에서 다시 크롭
-                        real_path = self.labels_path.parent / meta.get("real_photo", "")
-                        if real_path.exists():
-                            real_img = cv2.imread(str(real_path))
-                            if is_cropped:
-                                real_cropped = real_img
-                            else:
-                                real_cropped = center_crop_and_resize(real_img, size=512)
-                        else:
-                            self.log(f"실제 사진을 찾을 수 없습니다: {real_path}", "WARN")
-                            return
-                else:
-                    # 원본에서 다시 크롭
-                    real_path = self.labels_path.parent / meta.get("real_photo", "")
-                    if real_path.exists():
-                        real_img = cv2.imread(str(real_path))
-                        if is_cropped:
-                            real_cropped = real_img
-                        else:
-                            real_cropped = center_crop_and_resize(real_img, size=512)
-                    else:
-                        self.log(f"실제 사진을 찾을 수 없습니다: {real_path}", "WARN")
-                        return
-            else:
-                # 기존 방식: target 이미지 또는 원본에서 다시 크롭
-                target_path = output_root / meta.get("phase1_target", "")
-                if target_path.exists():
-                    target_img = cv2.imread(str(target_path))
-                    if target_img is not None:
-                        # target이 결합된 이미지일 수도 있으므로 확인
-                        h, w = target_img.shape[:2]
-                        if w > h:  # 가로가 더 길면 결합된 이미지
-                            real_cropped = target_img[:, w//2:]
-                        else:
-                            real_cropped = target_img
-                    else:
-                        # 원본에서 다시 크롭
-                        real_path = self.labels_path.parent / meta.get("real_photo", "")
-                        if real_path.exists():
-                            real_img = cv2.imread(str(real_path))
-                            if is_cropped:
-                                real_cropped = real_img
-                            else:
-                                real_cropped = center_crop_and_resize(real_img, size=512)
-                        else:
-                            self.log(f"실제 사진을 찾을 수 없습니다: {real_path}", "WARN")
-                            return
-                else:
-                    # 원본에서 다시 크롭
-                    real_path = self.labels_path.parent / meta.get("real_photo", "")
-                    if real_path.exists():
-                        real_img = cv2.imread(str(real_path))
-                        if is_cropped:
-                            real_cropped = real_img
-                        else:
-                            real_cropped = center_crop_and_resize(real_img, size=512)
-                    else:
-                        self.log(f"실제 사진을 찾을 수 없습니다: {real_path}", "WARN")
-                        return
-            
-            # CG 이미지와 실제 사진을 가로로 결합
-            combined_image = np.hstack([phase1_cropped, real_cropped])
-            
-            # 결합된 이미지로 저장
-            combined_path = output_root / meta.get("combined_image", meta.get("phase1_input", ""))
-            if "combined_image" not in meta:
-                # 기존 메타데이터에는 combined_image가 없을 수 있으므로 input 경로 사용
-                combined_path = output_root / meta.get("phase1_input", "")
-                meta["combined_image"] = str(combined_path.relative_to(output_root))
-            
-            cv2.imwrite(str(combined_path), combined_image)
+            input_path = output_root / meta["phase1_input"]
+            cv2.imwrite(str(input_path), phase1_cropped)
             
             # 메타데이터 업데이트
             meta["bg_color"] = bg_hex
@@ -1222,3 +1096,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

@@ -228,7 +228,8 @@ const SignboardForm = ({ formData, onFormDataChange, section = 'full' }) => {
             <option value="후광채널" className="bg-gray-800">후광채널 (뒷면 발광)</option>
             <option value="전후광채널" className="bg-gray-800">전후광채널 (앞+뒤 발광)</option>
             <option value="스카시" className="bg-gray-800">스카시 (비조명입체)</option>
-            <option value="플렉스" className="bg-gray-800">플렉스 (천 재질)</option>
+            <option value="플렉스_LED" className="bg-gray-800">플렉스 LED (LED 백라이트)</option>
+            <option value="플렉스_기본" className="bg-gray-800">플렉스 기본 (천 재질)</option>
             <option value="어닝간판" className="bg-gray-800">어닝간판 (천막형)</option>
           </select>
         </div>

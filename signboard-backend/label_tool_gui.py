@@ -43,7 +43,8 @@ def log_error(error_msg, exc_info=None):
 SIGN_TYPES = {
     '1': 'channel',
     '2': 'scasi',
-    '3': 'flex'
+    '3': 'flex_basic',  # 기본 플렉스 (LED 없음)
+    '4': 'flex_led'     # LED 플렉스 (LED 백라이트)
 }
 
 # 설치 방법 매핑
@@ -62,22 +63,25 @@ TIME_TYPES = {
     'n': 'night'
 }
 
-# 채널 타입 매핑 (전광/후광)
+# 채널 타입 매핑 (전광/후광/전후광)
 CHANNEL_TYPES = {
     'f': 'front',  # 전광
-    'h': 'back'    # 후광 (h = 후광의 후)
+    'h': 'back',   # 후광 (h = 후광의 후)
+    'b': 'both'    # 전후광 (b = both의 첫글자)
 }
 
 # 타입 한글명
 SIGN_TYPE_NAMES = {
     'channel': '채널',
     'scasi': '스카시',
-    'flex': '플렉스'
+    'flex_basic': '플렉스 기본',
+    'flex_led': '플렉스 LED'
 }
 
 CHANNEL_TYPE_NAMES = {
     'front': '전광',
-    'back': '후광'
+    'back': '후광',
+    'both': '전후광'
 }
 
 INSTALLATION_TYPE_NAMES = {
@@ -175,7 +179,7 @@ class LabelingToolGUI:
     
     def load_labels(self):
         """labels.json 로드 및 구조 마이그레이션"""
-        # 기본 구조 정의 (전광/후광 구분)
+        # 기본 구조 정의 (전광/후광/전후광 구분)
         default_structure = {
             # 전광채널
             "channel_front_wall": {"day": [], "night": []},
@@ -185,6 +189,10 @@ class LabelingToolGUI:
             "channel_back_wall": {"day": [], "night": []},
             "channel_back_frame_bar": {"day": [], "night": []},
             "channel_back_frame_plate": {"day": [], "night": []},
+            # 전후광채널
+            "channel_front_back_wall": {"day": [], "night": []},
+            "channel_front_back_frame_bar": {"day": [], "night": []},
+            "channel_front_back_frame_plate": {"day": [], "night": []},
             # 스카시
             "scasi_wall": {"day": [], "night": []},
             "scasi_frame_bar": {"day": [], "night": []},
@@ -265,33 +273,13 @@ class LabelingToolGUI:
                 return
             return func(*args)
         
-        self.root.bind('<Key-1>', lambda e: check_focus_and_call(self.select_sign_type, '1'))
-        self.root.bind('<Key-2>', lambda e: check_focus_and_call(self.select_sign_type, '2'))
-        self.root.bind('<Key-3>', lambda e: check_focus_and_call(self.select_sign_type, '3'))
-        self.root.bind('<Key-f>', lambda e: check_focus_and_call(self.select_channel_type, 'f'))
-        self.root.bind('<Key-F>', lambda e: check_focus_and_call(self.select_channel_type, 'f'))
-        self.root.bind('<Key-h>', lambda e: check_focus_and_call(self.select_channel_type, 'h'))  # 후광
-        self.root.bind('<Key-H>', lambda e: check_focus_and_call(self.select_channel_type, 'h'))
-        self.root.bind('<Key-w>', lambda e: check_focus_and_call(self.select_installation_type, 'w'))
-        self.root.bind('<Key-W>', lambda e: check_focus_and_call(self.select_installation_type, 'w'))
-        self.root.bind('<Key-b>', lambda e: check_focus_and_call(self.select_installation_type, 'b'))
-        self.root.bind('<Key-B>', lambda e: check_focus_and_call(self.select_installation_type, 'b'))
-        self.root.bind('<Key-p>', lambda e: check_focus_and_call(self.select_installation_type, 'p'))
-        self.root.bind('<Key-P>', lambda e: check_focus_and_call(self.select_installation_type, 'p'))
-        self.root.bind('<Key-d>', lambda e: check_focus_and_call(self.select_time_type, 'd'))
-        self.root.bind('<Key-D>', lambda e: check_focus_and_call(self.select_time_type, 'd'))
-        self.root.bind('<Key-n>', lambda e: check_focus_and_call(self.select_time_type, 'n'))
-        self.root.bind('<Key-N>', lambda e: check_focus_and_call(self.select_time_type, 'n'))
-        self.root.bind('<Key-o>', lambda e: check_focus_and_call(self.select_lights, 'o'))
-        self.root.bind('<Key-O>', lambda e: check_focus_and_call(self.select_lights, 'o'))
-        self.root.bind('<Key-x>', lambda e: check_focus_and_call(self.select_lights, 'x'))
-        self.root.bind('<Key-X>', lambda e: check_focus_and_call(self.select_lights, 'x'))
+        # 키보드 단축키: 건너뛰기, 되돌리기만 유지
         self.root.bind('<Key-s>', lambda e: check_focus_and_call(self.skip_image))
         self.root.bind('<Key-S>', lambda e: check_focus_and_call(self.skip_image))
         self.root.bind('<Key-z>', lambda e: check_focus_and_call(self.undo_last))
         self.root.bind('<Key-Z>', lambda e: check_focus_and_call(self.undo_last))
-        self.root.bind('<Key-q>', lambda e: check_focus_and_call(self.quit_app))
-        self.root.bind('<Key-Q>', lambda e: check_focus_and_call(self.quit_app))
+        # Escape 키로 텍스트 입력란에서 포커스 해제
+        self.root.bind('<Escape>', lambda e: self.root.focus_set())
         self.root.focus_set()
         
         # 메인 프레임
@@ -381,6 +369,8 @@ class LabelingToolGUI:
         # 오른쪽: 컨트롤 패널
         control_frame = ttk.LabelFrame(center_frame, text="분류", padding="10")
         control_frame.grid(row=0, column=1, sticky=(tk.W, tk.E, tk.N, tk.S))
+        # 컨트롤 패널 클릭 시 포커스를 root로 이동 (단축키 사용 가능하도록)
+        control_frame.bind("<Button-1>", lambda e: self.root.focus_set())
         
         # 간판 타입 선택
         type_label = ttk.Label(control_frame, text="간판 타입:", font=('맑은 고딕', 11, 'bold'))
@@ -639,7 +629,7 @@ class LabelingToolGUI:
         help_frame = ttk.Frame(main_frame)
         help_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=(10, 0))
         
-        help_text = "키보드 단축키: [1] 채널 | [2] 스카시 | [3] 플렉스 | [F] 전광 | [H] 후광 | [W] 맨벽 | [B] 프레임바 | [P] 프레임판 | [D] 주간 | [N] 야간 | [O] 조명켜짐 | [X] 조명꺼짐 | [S] 건너뛰기 | [Z] 되돌리기 | [Q] 종료 | 마우스 드래그로 간판 영역 선택"
+        help_text = "키보드 단축키: [S] 건너뛰기 | [Z] 되돌리기 | [ESC] 포커스 해제 | 마우스 드래그로 간판 영역 선택"
         help_label = ttk.Label(
             help_frame,
             text=help_text,
@@ -976,10 +966,13 @@ class LabelingToolGUI:
         time_type = TIME_TYPES[self.selected_time_type]
         
         # 조합 키 생성
-        # 채널인 경우: "channel_front_wall" 또는 "channel_back_wall"
+        # 채널인 경우: "channel_front_wall", "channel_back_wall", 또는 "channel_front_back_wall"
         # 스카시/플렉스인 경우: "scasi_wall" 또는 "flex_frame_plate"
         if sign_type == 'channel':
             channel_type = CHANNEL_TYPES[self.selected_channel_type]
+            # 전후광인 경우 "both"를 "front_back"로 변환
+            if channel_type == 'both':
+                channel_type = 'front_back'
             sign_type_key = f"{sign_type}_{channel_type}_{installation_type}"
         else:
             sign_type_key = f"{sign_type}_{installation_type}"
@@ -1240,6 +1233,8 @@ class LabelingToolGUI:
     
     def on_crop_start(self, event):
         """크롭 시작"""
+        # 포커스를 root로 이동 (단축키 사용 가능하도록)
+        self.root.focus_set()
         self.crop_start = (event.x, event.y)
         if self.crop_rect:
             self.canvas.delete(self.crop_rect)
@@ -1303,7 +1298,7 @@ class LabelingToolGUI:
         )
     
     def save_cropped_image(self, original_path, sign_type_key, time_type):
-        """크롭된 이미지를 저장 (512x512로 리사이즈, 비율 유지 + 패딩)
+        """크롭된 이미지를 저장 (강제로 512x512로 리사이즈, 패딩 없음)
         
         Args:
             original_path: 원본 이미지 경로
@@ -1315,18 +1310,18 @@ class LabelingToolGUI:
         
         x, y, w, h = self.crop_region
         
-        # 원본 이미지에서 크롭
-        cropped = self.current_image.crop((x, y, x + w, y + h))
+        # 원본 이미지에서 크롭 (PIL)
+        cropped_pil = self.current_image.crop((x, y, x + w, y + h))
         
-        # 512x512로 리사이즈 (비율 유지)
+        # PIL을 numpy 배열로 변환 (RGB)
+        cropped_np = np.array(cropped_pil)
+        
+        # OpenCV 형식으로 변환 (RGB -> BGR)
+        cropped_cv = cv2.cvtColor(cropped_np, cv2.COLOR_RGB2BGR)
+        
+        # 강제로 512x512로 리사이즈 (패딩 없이, INTER_LANCZOS4 사용)
         target_size = 512
-        cropped.thumbnail((target_size, target_size), Image.Resampling.LANCZOS)
-        
-        # 패딩을 추가하여 정사각형 만들기
-        padded = Image.new('RGB', (target_size, target_size), (255, 255, 255))
-        paste_x = (target_size - cropped.width) // 2
-        paste_y = (target_size - cropped.height) // 2
-        padded.paste(cropped, (paste_x, paste_y))
+        resized = cv2.resize(cropped_cv, (target_size, target_size), interpolation=cv2.INTER_LANCZOS4)
         
         # 저장 경로 생성: {sign_type_key}_{time_type}_{original_stem}_cropped.jpg
         original_stem = original_path.stem
@@ -1349,8 +1344,8 @@ class LabelingToolGUI:
             if counter > 10000:  # 무한 루프 방지
                 raise RuntimeError(f"중복 파일명 해결 실패: {self.cropped_photos_dir}")
         
-        # 저장
-        padded.save(self.cropped_photo_path, 'JPEG', quality=95)
+        # OpenCV로 저장 (JPEG, 품질 95)
+        cv2.imwrite(str(self.cropped_photo_path), resized, [cv2.IMWRITE_JPEG_QUALITY, 95])
     
     def on_text_changed(self, event):
         """텍스트 입력 변경"""
