@@ -12,14 +12,6 @@ import sys
 import logging
 import os
 
-# AI 브랜딩 시스템 import (선택적 - openai가 없어도 작동)
-try:
-    from ai_branding import AIBrandingSystem
-    AI_BRANDING_AVAILABLE = True
-except ImportError:
-    AI_BRANDING_AVAILABLE = False
-    AIBrandingSystem = None
-
 # 로깅 설정
 logging.basicConfig(
     level=logging.INFO,
@@ -29,6 +21,43 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+
+# AI 브랜딩 시스템 import (선택적 - openai가 없어도 작동)
+try:
+    from ai_branding import AIBrandingSystem
+    AI_BRANDING_AVAILABLE = True
+except ImportError:
+    AI_BRANDING_AVAILABLE = False
+    AIBrandingSystem = None
+
+# pix2pix 추론 엔진 (선택적)
+try:
+    from pix2pix_inference import SignboardAIEngine
+    PIX2PIX_AVAILABLE = True
+except ImportError as e:
+    PIX2PIX_AVAILABLE = False
+    logger.warning(f"Pix2pix 추론 엔진을 사용할 수 없습니다: {e}")
+
+# 전역 pix2pix 엔진 (서버 시작 시 1회만 로드)
+pix2pix_engine = None
+
+def get_pix2pix_engine():
+    """Pix2pix 엔진 싱글톤 (지연 로딩)"""
+    global pix2pix_engine
+    if pix2pix_engine is None and PIX2PIX_AVAILABLE:
+        try:
+            checkpoint_path = os.path.join(
+                os.path.dirname(__file__),
+                'checkpoints',
+                'signboard_pix2pix_v1',
+                '140_net_G.pth'
+            )
+            pix2pix_engine = SignboardAIEngine(checkpoint_path)
+            logger.info(f"Pix2pix 모델 로드 완료: {checkpoint_path}")
+        except Exception as e:
+            logger.error(f"Pix2pix 모델 로드 실패: {e}", exc_info=True)
+            pix2pix_engine = None
+    return pix2pix_engine
 
 # 전면프레임 전광/후광/전후광 디버그 전용 파일 로거
 debug_logger = logging.getLogger("front_back_frame")
@@ -108,14 +137,29 @@ def remove_white_background(image_bgr: np.ndarray, threshold: int = 240) -> np.n
     return image_rgba
 
 def get_korean_font(font_size: int):
-    """한글 폰트 찾기 - 여러 폰트 시도"""
-    font_paths = [
-        "C:/Windows/Fonts/malgun.ttf",  # 맑은 고딕
-        "C:/Windows/Fonts/gulim.ttc",   # 굴림
-        "C:/Windows/Fonts/batang.ttc",  # 바탕
-        "C:/Windows/Fonts/NanumGothic.ttf",  # 나눔고딕
-        "C:/Windows/Fonts/NanumBarunGothic.ttf",  # 나눔바른고딕
-    ]
+    """한글 폰트 찾기 - 여러 폰트 시도 (Windows/Linux 호환)"""
+    import platform
+    is_windows = platform.system() == "Windows"
+    
+    font_paths = []
+    if is_windows:
+        font_paths = [
+            "C:/Windows/Fonts/malgun.ttf",  # 맑은 고딕
+            "C:/Windows/Fonts/gulim.ttc",   # 굴림
+            "C:/Windows/Fonts/batang.ttc",  # 바탕
+            "C:/Windows/Fonts/NanumGothic.ttf",  # 나눔고딕
+            "C:/Windows/Fonts/NanumBarunGothic.ttf",  # 나눔바른고딕
+        ]
+    else:
+        # Linux 경로
+        font_paths = [
+            "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+            "/usr/share/fonts/truetype/nanum/NanumBarunGothic.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/TTF/NanumGothic.ttf",
+            "/System/Library/Fonts/AppleGothic.ttf",  # macOS
+        ]
     
     for font_path in font_paths:
         try:
@@ -799,7 +843,7 @@ def render_scashi_signboard(text: str, bg_color: str, text_color: str, logo_img:
     
     return result
 
-def render_combined_signboard(installation_type: str, sign_type: str, text: str, bg_color: str, text_color: str, logo_img: Image.Image = None, logo_type: str = "channel", text_direction: str = "horizontal", font_size: int = 100, text_position_x: int = 50, text_position_y: int = 50, width: int = 1200, height: int = 300, use_actual_bg_for_training: bool = False, lights_enabled: bool = False):
+def render_combined_signboard(installation_type: str, sign_type: str, text: str, bg_color: str, text_color: str, logo_img: Image.Image = None, logo_type: str = "channel", text_direction: str = "horizontal", font_size: int = 100, text_position_x: int = 50, text_position_y: int = 50, width: int = 1200, height: int = 300, use_actual_bg_for_training: bool = False, lights_enabled: bool = False, white_background: bool = False):
     """설치 방식 + 간판 종류 조합 렌더링
     Returns: (signboard_image, text_layer)
     - 전광채널: (signboard, text_layer) - text_layer는 텍스트만 분리
@@ -809,6 +853,7 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
     Args:
         use_actual_bg_for_training: True면 맨벽/프레임바도 실제 배경색 사용 (학습 데이터용)
                                     False면 맨벽/프레임바는 투명 배경 (시안 생성용, 기본값)
+        white_background: True면 모든 설치 방식에 대해 흰색 배경 강제 (평면 시안용)
     """
     # 스카시 재질 파싱
     material = None
@@ -819,7 +864,11 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
     
     # 배경 생성 (설치 방식에 따라) - 프레임바는 텍스트 크기 측정 후에 그려야 함
     is_frame_bar = (installation_type == "프레임바")
-    if installation_type == "프레임바":
+    
+    # 흰색 배경 강제 옵션
+    if white_background:
+        signboard = Image.new('RGB', (width, height), color=(255, 255, 255))
+    elif installation_type == "프레임바":
         if use_actual_bg_for_training:
             # 학습용: 실제 배경색 사용
             bg_rgb = hex_to_rgb(bg_color) if bg_color.startswith('#') else (220, 220, 220)
@@ -1062,8 +1111,8 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
         frame_layer = (frame_layer.astype(np.float32) * (1 - text_alpha_3ch)).astype(np.uint8)
         
         # 프레임바 레이어를 signboard_np에 합성
-        if use_actual_bg_for_training:
-            # 학습용: 배경이 있으므로 alpha 블렌딩 사용
+        if use_actual_bg_for_training or white_background:
+            # 학습용 또는 흰색 배경: 배경이 있으므로 alpha 블렌딩 사용
             # 막대가 있는 영역만 alpha 1.0 (frame_layer는 이미 텍스트 영역 제외됨)
             frame_alpha = (frame_layer.sum(axis=2) > 0).astype(np.float32)
             frame_alpha_3ch = np.stack([frame_alpha, frame_alpha, frame_alpha], axis=2)
@@ -1554,9 +1603,12 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
         result = add_3d_depth(result_np, depth=6)
         return result, None
 
-def render_signboard(text: str, logo_path: str, logo_type: str, installation_type: str, sign_type: str, bg_color: str, text_color: str, text_direction: str = "horizontal", font_size: int = 100, text_position_x: int = 50, text_position_y: int = 50, width: int = 1200, height: int = 300, use_actual_bg_for_training: bool = False, lights_enabled: bool = False) -> tuple:
+def render_signboard(text: str, logo_path: str, logo_type: str, installation_type: str, sign_type: str, bg_color: str, text_color: str, text_direction: str = "horizontal", font_size: int = 100, text_position_x: int = 50, text_position_y: int = 50, width: int = 1200, height: int = 300, use_actual_bg_for_training: bool = False, lights_enabled: bool = False, white_background: bool = False) -> tuple:
     """간판 이미지 생성 - 설치 방식 + 간판 종류
     Returns: (day_image, text_layer) - text_layer는 전광채널만 분리, 나머지는 None
+    
+    Args:
+        white_background: True면 흰색 배경에 간판만 렌더링 (평면 시안용)
     """
     print(f"[DEBUG] render_signboard called with sign_type: {sign_type}")
     # 로고 이미지 로드
@@ -1572,28 +1624,28 @@ def render_signboard(text: str, logo_path: str, logo_type: str, installation_typ
     # 야간 합성에서만 전광/후광 차이를 둔다.
     if sign_type == "전광채널":
         # 전광채널: 직접 처리 (주간은 그림자+옆면+앞면, 야간은 별도 처리)
-        result, text_layer = render_combined_signboard(installation_type, "전광채널", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height, use_actual_bg_for_training, lights_enabled)
+        result, text_layer = render_combined_signboard(installation_type, "전광채널", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height, use_actual_bg_for_training, lights_enabled, white_background)
         return result, text_layer
     elif sign_type == "후광채널":
-        result, text_layer = render_combined_signboard(installation_type, "후광채널", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height, use_actual_bg_for_training, lights_enabled)
+        result, text_layer = render_combined_signboard(installation_type, "후광채널", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height, use_actual_bg_for_training, lights_enabled, white_background)
         return result, text_layer
     elif sign_type == "전후광채널":
-        result, text_layer = render_combined_signboard(installation_type, "전후광채널", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height, use_actual_bg_for_training, lights_enabled)
+        result, text_layer = render_combined_signboard(installation_type, "전후광채널", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height, use_actual_bg_for_training, lights_enabled, white_background)
         return result, text_layer
     elif sign_type.startswith("스카시"):
         # 스카시_금속, 스카시_아크릴 등 모든 스카시 변형 지원
         print(f"[DEBUG] render_signboard: 스카시 감지, sign_type={sign_type}, render_combined_signboard 호출")
-        result, _ = render_combined_signboard(installation_type, sign_type, text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height, use_actual_bg_for_training, lights_enabled)
+        result, _ = render_combined_signboard(installation_type, sign_type, text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height, use_actual_bg_for_training, lights_enabled, white_background)
         return result, None
     elif sign_type == "플렉스":
-        result, _ = render_combined_signboard(installation_type, "플렉스", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height, use_actual_bg_for_training, lights_enabled)
+        result, _ = render_combined_signboard(installation_type, "플렉스", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height, use_actual_bg_for_training, lights_enabled, white_background)
         return result, None
     elif sign_type == "어닝간판":
-        result, _ = render_combined_signboard(installation_type, "어닝간판", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height, use_actual_bg_for_training, lights_enabled)
+        result, _ = render_combined_signboard(installation_type, "어닝간판", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height, use_actual_bg_for_training, lights_enabled, white_background)
         return result, None
     else:
         # 기본값: 전광채널
-        result, text_layer = render_combined_signboard(installation_type, "전광채널", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height, use_actual_bg_for_training, lights_enabled)
+        result, text_layer = render_combined_signboard(installation_type, "전광채널", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height, use_actual_bg_for_training, lights_enabled, white_background)
         return result, text_layer
 
 def order_points(pts):
@@ -1629,6 +1681,747 @@ def order_points(pts):
         bottom_left = remaining_pts[0]
     
     return np.array([top_left, top_right, bottom_right, bottom_left], dtype=np.float32)
+
+def generate_flat_design(
+    building_photo: np.ndarray,  # 원본 건물 사진
+    polygon_points: list,
+    signboard_image: np.ndarray,
+    frame_line_color: tuple = (180, 180, 180),  # 회색 프레임 색상
+    background_color: tuple = (255, 255, 255),  # 흰색 배경
+    padding_ratio: float = 0.1,  # 프레임 주변 여백 비율 (10%)
+    show_dimensions: bool = True,  # 치수 표시 여부
+    region_width: int = None,  # 실제 영역 너비 (픽셀)
+    region_height: int = None,  # 실제 영역 높이 (픽셀)
+) -> np.ndarray:
+    """
+    평면 시안 생성: 원본 건물 사진에서 폴리곤 영역을 정면으로 펴서 가져온 후 간판 시안 합성
+    
+    Args:
+        building_photo: 원본 건물 사진 (BGR)
+        polygon_points: 폴리곤 점 리스트 [[x1, y1], [x2, y2], ...]
+        signboard_image: 렌더링된 간판 이미지 (BGR)
+        frame_line_color: 프레임 선 색상 (BGR)
+        background_color: 배경 색상 (RGB)
+        padding_ratio: 프레임 주변 여백 비율 (0.1 = 10%)
+        show_dimensions: 치수 표시 여부
+        region_width: 실제 영역 너비 (픽셀, 치수 표시용)
+        region_height: 실제 영역 높이 (픽셀, 치수 표시용)
+    
+    Returns:
+        평면 시안 이미지 (BGR)
+    """
+    # 1. 폴리곤 영역의 가로세로 비율 계산
+    if len(polygon_points) == 4:
+        ordered = order_points(polygon_points)
+        top_width = np.sqrt((ordered[1][0] - ordered[0][0])**2 + (ordered[1][1] - ordered[0][1])**2)
+        left_height = np.sqrt((ordered[3][0] - ordered[0][0])**2 + (ordered[3][1] - ordered[0][1])**2)
+        calculated_width = top_width
+        calculated_height = left_height
+    else:
+        xs = [p[0] for p in polygon_points]
+        ys = [p[1] for p in polygon_points]
+        calculated_width = max(xs) - min(xs)
+        calculated_height = max(ys) - min(ys)
+    
+    # region_width/height가 제공되지 않으면 계산된 값 사용
+    if region_width is None:
+        region_width = int(calculated_width)
+    if region_height is None:
+        region_height = int(calculated_height)
+    
+    # 2. 간판 이미지 크기 결정
+    signboard_h, signboard_w = signboard_image.shape[:2]
+    
+    # 3. 원본 건물 사진에서 폴리곤 영역을 정면으로 펴기 (Perspective Transform)
+    if len(polygon_points) == 4:
+        # 4점인 경우: 정확한 투영 변환
+        src_points = order_points(polygon_points)  # 건물 사진의 폴리곤 4점 (정렬됨)
+        
+        # 목표 사각형 (정면으로 펴진 영역)
+        dst_width = int(calculated_width)
+        dst_height = int(calculated_height)
+        dst_points = np.array([
+            [0, 0],
+            [dst_width, 0],
+            [dst_width, dst_height],
+            [0, dst_height]
+        ], dtype=np.float32)
+        
+        # 투영 변환 행렬 계산 (건물 사진의 폴리곤 -> 정면 사각형)
+        M = cv2.getPerspectiveTransform(src_points, dst_points)
+        
+        # 원본 건물 사진에서 폴리곤 영역을 정면으로 펴기
+        warped_building = cv2.warpPerspective(
+            building_photo,
+            M,
+            (dst_width, dst_height),
+            flags=cv2.INTER_LINEAR,
+            borderMode=cv2.BORDER_CONSTANT,
+            borderValue=(255, 255, 255)  # 여백은 흰색
+        )
+    else:
+        # 4점이 아닌 경우: 바운딩 박스로 크롭
+        xs = [p[0] for p in polygon_points]
+        ys = [p[1] for p in polygon_points]
+        min_x, max_x = int(min(xs)), int(max(xs))
+        min_y, max_y = int(min(ys)), int(max(ys))
+        
+        # 바운딩 박스 크기
+        bbox_w = max_x - min_x
+        bbox_h = max_y - min_y
+        
+        # 건물 사진에서 해당 영역 크롭
+        if min_x >= 0 and min_y >= 0 and max_x <= building_photo.shape[1] and max_y <= building_photo.shape[0]:
+            warped_building = building_photo[min_y:max_y, min_x:max_x].copy()
+            # 크롭된 이미지를 목표 크기로 리사이즈
+            if bbox_w > 0 and bbox_h > 0:
+                warped_building = cv2.resize(warped_building, (int(calculated_width), int(calculated_height)))
+            else:
+                warped_building = np.ones((int(calculated_height), int(calculated_width), 3), dtype=np.uint8) * 255
+        else:
+            # 범위 초과 시 흰색 배경
+            warped_building = np.ones((int(calculated_height), int(calculated_width), 3), dtype=np.uint8) * 255
+    
+    # 4. 펴진 건물 배경의 크기를 간판 이미지 크기에 맞추기
+    warped_building_resized = cv2.resize(warped_building, (signboard_w, signboard_h))
+    
+    # 5. 캔버스 크기 결정 (펴진 배경 + 여백 + 치수 표시 공간)
+    frame_width = signboard_w
+    frame_height = signboard_h
+    
+    padding_x = int(frame_width * padding_ratio)
+    padding_y = int(frame_height * padding_ratio)
+    
+    # 치수 표시를 위한 추가 공간 (우측에 여백 추가)
+    dimension_space = 80 if show_dimensions else 0
+    canvas_width = frame_width + (padding_x * 2) + dimension_space
+    canvas_height = frame_height + (padding_y * 2)
+    
+    # 6. 흰색 배경 캔버스 생성
+    canvas = Image.new('RGB', (canvas_width, canvas_height), color=background_color)
+    canvas_np = cv2.cvtColor(np.array(canvas), cv2.COLOR_RGB2BGR)
+    
+    # 7. 펴진 건물 배경을 캔버스에 배치
+    frame_x = padding_x
+    frame_y = padding_y
+    canvas_np[frame_y:frame_y + frame_height, frame_x:frame_x + frame_width] = warped_building_resized
+    
+    # 8. 회색 프레임 그리기 (사각형)
+    line_thickness = max(2, min(5, int(min(frame_width, frame_height) * 0.005)))
+    cv2.rectangle(
+        canvas_np,
+        (frame_x, frame_y),
+        (frame_x + frame_width, frame_y + frame_height),
+        frame_line_color,
+        line_thickness
+    )
+    
+    # 9. 간판 이미지를 펴진 배경 위에 합성 (알파 블렌딩)
+    signboard_resized = cv2.resize(signboard_image, (frame_width, frame_height))
+    
+    # 간판 이미지가 검은색 배경(투명 처리된 부분)인 경우 마스크 생성
+    # 검은색 부분은 건물 배경을 보여주고, 나머지는 간판을 보여줌
+    signboard_gray = cv2.cvtColor(signboard_resized, cv2.COLOR_BGR2GRAY)
+    _, mask = cv2.threshold(signboard_gray, 10, 255, cv2.THRESH_BINARY)  # 검은색(0~10)은 배경, 나머지는 간판
+    mask = mask.astype(np.float32) / 255.0
+    mask = np.stack([mask, mask, mask], axis=2)
+    
+    # 알파 블렌딩: 간판이 있는 부분은 간판, 없는 부분은 건물 배경
+    canvas_region = canvas_np[frame_y:frame_y + frame_height, frame_x:frame_x + frame_width]
+    blended = (signboard_resized * mask + canvas_region * (1 - mask)).astype(np.uint8)
+    canvas_np[frame_y:frame_y + frame_height, frame_x:frame_x + frame_width] = blended
+    
+    # 10. 치수 표시 (우측에)
+    if show_dimensions:
+        font_scale = 0.6
+        font_thickness = 2
+        font_color = (100, 100, 100)  # 어두운 회색
+        
+        # 높이 표시 (h450 형식)
+        height_mm = int(region_height * 0.264583)  # 대략적인 변환
+        dimension_text = f"h{height_mm}"
+        
+        # 텍스트 위치 (프레임 우측 상단)
+        text_x = frame_x + frame_width + 10
+        text_y = frame_y + 30
+        
+        cv2.putText(
+            canvas_np,
+            dimension_text,
+            (text_x, text_y),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            font_scale,
+            font_color,
+            font_thickness,
+            cv2.LINE_AA
+        )
+    
+    return canvas_np
+
+def apply_night_glow_to_signboard(
+    signboard_img: np.ndarray,  # 간판 이미지 (BGR)
+    text_layer: np.ndarray = None,  # 텍스트 레이어 (RGBA)
+    sign_type: str = "",  # 간판 종류
+    target_width: int = None,  # 목표 너비 (리사이즈용)
+    target_height: int = None,  # 목표 높이 (리사이즈용)
+) -> np.ndarray:
+    """
+    간판 이미지에 야간 발광 효과를 적용하는 함수
+    Phase 1의 render_combined_signboard에서 사용하는 발광 로직을 재사용
+    (Phase 1 코드: 1407-1498줄 참고)
+    
+    TODO: 나중에 Phase 1의 render_combined_signboard에서도 이 함수를 호출하도록 통합 필요
+    """
+    if sign_type not in ["전광채널", "후광채널", "전후광채널"]:
+        return signboard_img
+    
+    # 목표 크기가 지정되면 리사이즈
+    if target_width and target_height:
+        signboard_resized = cv2.resize(signboard_img, (target_width, target_height))
+    else:
+        signboard_resized = signboard_img.copy()
+        target_width = signboard_img.shape[1]
+        target_height = signboard_img.shape[0]
+    
+    image_area = target_width * target_height
+    
+    if text_layer is not None:
+        # text_layer를 간판 크기에 맞게 리사이즈
+        text_layer_resized = cv2.resize(text_layer, (target_width, target_height), interpolation=cv2.INTER_LINEAR)
+        
+        if len(text_layer_resized.shape) == 3 and text_layer_resized.shape[2] == 4:
+            # RGBA -> BGR 변환
+            text_layer_bgr = cv2.cvtColor(text_layer_resized[:, :, :3], cv2.COLOR_RGB2BGR)
+            text_mask = text_layer_resized[:, :, 3].astype(np.float32) / 255.0  # (H, W)
+            
+            if sign_type == "전광채널":
+                # 전광: 텍스트 앞에서 빛남
+                text_glow = safe_gaussian_blur(text_layer_bgr, (25, 25), 10)
+                signboard_resized = cv2.addWeighted(signboard_resized, 1.0, text_glow, 0.8, 0)
+                
+            elif sign_type == "후광채널":
+                # 후광: Phase 1의 1407-1459줄 로직 그대로 재사용
+                # ============ 이미지 크기 기반 동적 후광 조정 ============
+                if image_area <= 300000:  # 약 548x548 이하
+                    blur_size1, blur_size2, blur_size3 = (31, 31), (31, 31), (21, 21)
+                    sigma1, sigma2, sigma3 = 15, 15, 10
+                    intensity = 1.8
+                else:
+                    blur_size1, blur_size2, blur_size3 = (141, 141), (141, 141), (121, 121)
+                    sigma1, sigma2, sigma3 = 70, 70, 60
+                    intensity = 4.0
+                
+                # 동적 blur 적용
+                backlight = safe_gaussian_blur(text_mask, blur_size1, sigma1)
+                backlight = safe_gaussian_blur(backlight, blur_size2, sigma2)
+                backlight = safe_gaussian_blur(backlight, blur_size3, sigma3)
+                
+                # 후광 색상: 기본 따뜻한 흰색 LED (Phase 1과 동일)
+                glow_color_bgr = np.array([220, 245, 255], dtype=np.float32)  # BGR
+                backlight_3d = backlight[:, :, np.newaxis]  # (H, W, 1)
+                backlight_glow = (backlight_3d * glow_color_bgr[np.newaxis, np.newaxis, :] * intensity).clip(0, 255).astype(np.float32)
+                
+                # 크기 확인 및 리사이즈
+                if signboard_resized.shape[:2] != backlight_glow.shape[:2]:
+                    backlight_glow = cv2.resize(backlight_glow, (signboard_resized.shape[1], signboard_resized.shape[0]), interpolation=cv2.INTER_AREA)
+                if signboard_resized.shape[:2] != text_mask.shape[:2]:
+                    text_mask = cv2.resize(text_mask, (signboard_resized.shape[1], signboard_resized.shape[0]), interpolation=cv2.INTER_AREA)
+                
+                # 글자 영역 제외하고 후광만 적용 (Phase 1과 동일)
+                text_mask_3ch = np.stack([text_mask, text_mask, text_mask], axis=2)
+                backlight_only = backlight_glow * (1 - text_mask_3ch)
+                signboard_resized = signboard_resized.astype(np.float32) + backlight_only
+                signboard_resized = np.clip(signboard_resized, 0, 255).astype(np.uint8)
+                
+            elif sign_type == "전후광채널":
+                # 전후광: 후광 + 전광
+                # 1) 후광 효과 먼저 적용 (후광채널과 동일)
+                if image_area <= 300000:
+                    blur_size1, blur_size2, blur_size3 = (31, 31), (31, 31), (21, 21)
+                    sigma1, sigma2, sigma3 = 15, 15, 10
+                    intensity = 1.8
+                else:
+                    blur_size1, blur_size2, blur_size3 = (141, 141), (141, 141), (121, 121)
+                    sigma1, sigma2, sigma3 = 70, 70, 60
+                    intensity = 4.0
+                
+                backlight = safe_gaussian_blur(text_mask, blur_size1, sigma1)
+                backlight = safe_gaussian_blur(backlight, blur_size2, sigma2)
+                backlight = safe_gaussian_blur(backlight, blur_size3, sigma3)
+                
+                glow_color_bgr = np.array([220, 245, 255], dtype=np.float32)
+                backlight_3d = backlight[:, :, np.newaxis]
+                backlight_glow = (backlight_3d * glow_color_bgr[np.newaxis, np.newaxis, :] * intensity).clip(0, 255).astype(np.float32)
+                
+                if signboard_resized.shape[:2] != backlight_glow.shape[:2]:
+                    backlight_glow = cv2.resize(backlight_glow, (signboard_resized.shape[1], signboard_resized.shape[0]), interpolation=cv2.INTER_AREA)
+                if signboard_resized.shape[:2] != text_mask.shape[:2]:
+                    text_mask = cv2.resize(text_mask, (signboard_resized.shape[1], signboard_resized.shape[0]), interpolation=cv2.INTER_AREA)
+                
+                text_mask_3ch = np.stack([text_mask, text_mask, text_mask], axis=2)
+                backlight_only = backlight_glow * (1 - text_mask_3ch)
+                signboard_resized = signboard_resized.astype(np.float32) + backlight_only
+                signboard_resized = np.clip(signboard_resized, 0, 255).astype(np.uint8)
+                
+                # 2) 전광 효과 추가 적용
+                text_glow = safe_gaussian_blur(text_layer_bgr, (25, 25), 10)
+                signboard_resized = cv2.addWeighted(signboard_resized, 1.0, text_glow, 0.6, 0)
+    else:
+        # text_layer가 없으면 간판 이미지에 직접 발광 효과 적용 (기존 로직 유지)
+        signboard_gray = cv2.cvtColor(signboard_resized, cv2.COLOR_BGR2GRAY)
+        _, mask = cv2.threshold(signboard_gray, 30, 255, cv2.THRESH_BINARY)
+        
+        if sign_type == "전광채널":
+            glow = safe_gaussian_blur(signboard_resized, (25, 25), 10)
+            signboard_resized = cv2.addWeighted(signboard_resized, 1.0, glow, 0.6, 0)
+        elif sign_type == "후광채널":
+            backlight = safe_gaussian_blur(mask, (81, 81), 40)
+            backlight = safe_gaussian_blur(backlight, (81, 81), 40)
+            backlight_bgr = cv2.cvtColor(backlight, cv2.COLOR_GRAY2BGR)
+            backlight_bgr = (backlight_bgr.astype(np.float32) * 1.5).clip(0, 255).astype(np.uint8)
+            signboard_resized = cv2.add(signboard_resized, backlight_bgr)
+        elif sign_type == "전후광채널":
+            backlight = safe_gaussian_blur(mask, (81, 81), 40)
+            backlight = safe_gaussian_blur(backlight, (81, 81), 40)
+            backlight_bgr = cv2.cvtColor(backlight, cv2.COLOR_GRAY2BGR)
+            backlight_bgr = (backlight_bgr.astype(np.float32) * 1.5).clip(0, 255).astype(np.uint8)
+            signboard_resized = cv2.add(signboard_resized, backlight_bgr)
+            
+            glow = safe_gaussian_blur(signboard_resized, (25, 25), 10)
+            signboard_resized = cv2.addWeighted(signboard_resized, 1.0, glow, 0.6, 0)
+    
+    return signboard_resized
+
+def generate_dual_flat_design(
+    building_photo: np.ndarray,  # 원본 건물 사진 (BGR)
+    polygon_points: list,  # 폴리곤 점 리스트 [[x1, y1], [x2, y2], ...]
+    signboard_image: np.ndarray,  # 렌더링된 간판 이미지 (BGR)
+    text_layer: np.ndarray = None,  # 텍스트 레이어 (RGBA, 선택적)
+    frame_line_color: tuple = (180, 180, 180),  # 프레임 선 색상 (BGR)
+    background_color: tuple = (255, 255, 255),  # 배경 색상 (RGB)
+    padding_ratio: float = 0.1,  # 프레임 주변 여백 비율 (10%)
+    show_dimensions: bool = True,  # 치수 표시 여부
+    region_width_mm: float = None,  # 실제 영역 너비 (mm, 치수 표시용)
+    region_height_mm: float = None,  # 실제 영역 높이 (mm, 치수 표시용)
+    region_width_px: int = None,  # 실제 영역 너비 (픽셀)
+    region_height_px: int = None,  # 실제 영역 높이 (픽셀)
+    night_mode: bool = False,  # 야간 모드 여부
+    sign_type: str = "",  # 간판 종류 (발광 효과용)
+) -> tuple:
+    """
+    평면 시안 생성: 두 가지 모드 (design_only, with_context)
+    
+    Args:
+        building_photo: 원본 건물 사진 (BGR)
+        polygon_points: 폴리곤 점 리스트
+        signboard_image: 렌더링된 간판 이미지 (BGR)
+        text_layer: 텍스트 레이어 (RGBA, 선택적, 알파 블렌딩용)
+        frame_line_color: 프레임 선 색상 (BGR)
+        background_color: 배경 색상 (RGB)
+        padding_ratio: 프레임 주변 여백 비율
+        show_dimensions: 치수 표시 여부
+        region_width_mm: 실제 영역 너비 (mm)
+        region_height_mm: 실제 영역 높이 (mm)
+        region_width_px: 실제 영역 너비 (픽셀)
+        region_height_px: 실제 영역 높이 (픽셀)
+        night_mode: 야간 모드 여부 (True면 야간 효과 적용)
+        sign_type: 간판 종류 (발광 효과용: "전광채널", "후광채널", "전후광채널")
+    
+    Returns:
+        (design_only_image, with_context_image, dimensions_dict)
+        - design_only_image: 흰색 배경 + 간판만 (BGR)
+        - with_context_image: 건물 외벽 + 간판 합성 (BGR, 야간 모드면 어두운 배경)
+        - dimensions_dict: {"width_mm": int, "height_mm": int, "scale": str}
+    """
+    # 1. 폴리곤 영역 크기 계산
+    if len(polygon_points) == 4:
+        # 4점: order_points로 정렬
+        ordered = order_points(polygon_points)
+        top_width = np.sqrt((ordered[1][0] - ordered[0][0])**2 + (ordered[1][1] - ordered[0][1])**2)
+        left_height = np.sqrt((ordered[3][0] - ordered[0][0])**2 + (ordered[3][1] - ordered[0][1])**2)
+        calculated_width = top_width
+        calculated_height = left_height
+    else:
+        # n점: 바운딩 박스
+        xs = [p[0] for p in polygon_points]
+        ys = [p[1] for p in polygon_points]
+        calculated_width = max(xs) - min(xs)
+        calculated_height = max(ys) - min(ys)
+    
+    # region_width/height_px가 제공되지 않으면 계산된 값 사용
+    if region_width_px is None:
+        region_width_px = int(calculated_width)
+    if region_height_px is None:
+        region_height_px = int(calculated_height)
+    
+    # 최소 크기 보장
+    region_width_px = max(300, region_width_px)
+    region_height_px = max(100, region_height_px)
+    
+    # 간판 이미지 크기
+    signboard_h, signboard_w = signboard_image.shape[:2]
+    
+    # 2. Mode B (with_context)용: 영역 확장 (중심 기준 상하좌우 25% 확장)
+    # 모든 경우(4점/n점)에 확장 로직 적용
+    xs = [p[0] for p in polygon_points]
+    ys = [p[1] for p in polygon_points]
+    min_x, max_x = min(xs), max(xs)
+    min_y, max_y = min(ys), max(ys)
+    
+    # 중심점
+    center_x = (min_x + max_x) / 2
+    center_y = (min_y + max_y) / 2
+    
+    # 현재 크기
+    bbox_w = max_x - min_x
+    bbox_h = max_y - min_y
+    
+    # 25% 확장 (총 1.5배)
+    expanded_w = bbox_w * 1.5
+    expanded_h = bbox_h * 1.5
+    
+    # 확장된 Bounding Box 좌표
+    expanded_min_x = center_x - expanded_w / 2
+    expanded_max_x = center_x + expanded_w / 2
+    expanded_min_y = center_y - expanded_h / 2
+    expanded_max_y = center_y + expanded_h / 2
+    
+    # 이미지 경계 내로 클리핑
+    img_h, img_w = building_photo.shape[:2]
+    expanded_min_x = max(0, int(expanded_min_x))
+    expanded_max_x = min(img_w, int(expanded_max_x))
+    expanded_min_y = max(0, int(expanded_min_y))
+    expanded_max_y = min(img_h, int(expanded_max_y))
+    
+    # 확장된 영역 크롭
+    expanded_building = building_photo[expanded_min_y:expanded_max_y, expanded_min_x:expanded_max_x].copy()
+    expanded_w_px = expanded_max_x - expanded_min_x
+    expanded_h_px = expanded_max_y - expanded_min_y
+    
+    # 확장된 영역을 정면으로 펴기 (Perspective Transform)
+    if len(polygon_points) == 4:
+        # 원본 폴리곤을 확장된 영역 내 상대 좌표로 변환
+        rel_polygon_points = [
+            [p[0] - expanded_min_x, p[1] - expanded_min_y]
+            for p in polygon_points
+        ]
+        
+        # 상대 좌표로 정렬
+        ordered_rel = order_points(rel_polygon_points)
+        
+        # 목표 사각형 (정면으로 펴진 영역)
+        dst_width = int(calculated_width)
+        dst_height = int(calculated_height)
+        dst_points = np.array([
+            [0, 0],
+            [dst_width, 0],
+            [dst_width, dst_height],
+            [0, dst_height]
+        ], dtype=np.float32)
+        
+        # 투영 변환 행렬 계산
+        M = cv2.getPerspectiveTransform(ordered_rel.astype(np.float32), dst_points)
+        
+        # 확장된 건물 배경을 정면으로 펴기
+        warped_building = cv2.warpPerspective(
+            expanded_building,
+            M,
+            (dst_width, dst_height),
+            flags=cv2.INTER_LINEAR,
+            borderMode=cv2.BORDER_CONSTANT,
+            borderValue=(255, 255, 255)  # 여백은 흰색
+        )
+    else:
+        # 4점이 아닌 경우: 바운딩 박스로 크롭
+        if expanded_w_px > 0 and expanded_h_px > 0:
+            warped_building = cv2.resize(expanded_building, (region_width_px, region_height_px))
+        else:
+            warped_building = np.ones((region_height_px, region_width_px, 3), dtype=np.uint8) * 255
+    
+    # 펴진 건물 배경을 간판 이미지 크기에 맞추기
+    warped_building_resized = cv2.resize(warped_building, (signboard_w, signboard_h))
+    
+    # 야간 모드: 건물 배경 어둡게 처리
+    if night_mode:
+        warped_building_resized = (warped_building_resized * 0.25).astype(np.uint8)
+    
+    # 3. 캔버스 크기 결정
+    frame_width = signboard_w
+    frame_height = signboard_h
+    
+    padding_x = int(frame_width * padding_ratio)
+    padding_y = int(frame_height * padding_ratio)
+    
+    dimension_space = 150 if show_dimensions else 0
+    canvas_width = frame_width + (padding_x * 2) + dimension_space
+    canvas_height = frame_height + (padding_y * 2)
+    
+    # 4. Mode A (design_only): 흰색 배경 + 간판만
+    canvas_design = Image.new('RGB', (canvas_width, canvas_height), color=background_color)
+    canvas_design_np = cv2.cvtColor(np.array(canvas_design), cv2.COLOR_RGB2BGR)
+    
+    # 간판 중앙 배치
+    frame_x = padding_x
+    frame_y = padding_y
+    signboard_resized = cv2.resize(signboard_image, (frame_width, frame_height))
+    
+    # 야간 모드: 간판에 발광 효과 적용 (Phase 1 로직 재사용)
+    if night_mode and sign_type in ["전광채널", "후광채널", "전후광채널"]:
+        signboard_resized = apply_night_glow_to_signboard(
+            signboard_img=signboard_resized,
+            text_layer=text_layer,
+            sign_type=sign_type,
+            target_width=frame_width,
+            target_height=frame_height
+        )
+    
+    # 알파 블렌딩 (text_layer가 있으면 사용)
+    if text_layer is not None:
+        # 야간 모드이고 발광 효과가 적용된 경우: signboard_resized 사용 (발광 효과 유지)
+        if night_mode and sign_type in ["전광채널", "후광채널", "전후광채널"]:
+            # 발광 효과가 적용된 signboard_resized를 그대로 사용
+            signboard_final = signboard_resized
+        else:
+            # 주간 모드: text_layer 사용
+            text_layer_resized = cv2.resize(text_layer, (frame_width, frame_height), interpolation=cv2.INTER_LINEAR)
+            alpha = text_layer_resized[:, :, 3:4].astype(np.float32) / 255.0
+            alpha_3ch = np.repeat(alpha, 3, axis=2)
+            
+            text_rgb = text_layer_resized[:, :, :3]
+            
+            # RGBA -> RGB 변환 (흰색 배경에 합성)
+            blended_rgb = (np.ones((frame_height, frame_width, 3), dtype=np.float32) * 255) * (1 - alpha_3ch) + text_rgb * alpha_3ch
+            signboard_final = cv2.cvtColor(blended_rgb.astype(np.uint8), cv2.COLOR_RGB2BGR)
+    else:
+        # text_layer가 없으면 간판 이미지 그대로 사용
+        signboard_final = signboard_resized
+    
+    canvas_design_np[frame_y:frame_y + frame_height, frame_x:frame_x + frame_width] = signboard_final
+    
+    # 프레임 그리기
+    line_thickness = max(2, min(5, int(min(frame_width, frame_height) * 0.005)))
+    cv2.rectangle(
+        canvas_design_np,
+        (frame_x, frame_y),
+        (frame_x + frame_width, frame_y + frame_height),
+        frame_line_color,
+        line_thickness
+    )
+    
+    # 5. Mode B (with_context): 건물 외벽 + 간판 합성
+    canvas_context = Image.new('RGB', (canvas_width, canvas_height), color=background_color)
+    canvas_context_np = cv2.cvtColor(np.array(canvas_context), cv2.COLOR_RGB2BGR)
+    
+    # 펴진 건물 배경 배치
+    canvas_context_np[frame_y:frame_y + frame_height, frame_x:frame_x + frame_width] = warped_building_resized
+    
+    # 프레임 그리기
+    cv2.rectangle(
+        canvas_context_np,
+        (frame_x, frame_y),
+        (frame_x + frame_width, frame_y + frame_height),
+        frame_line_color,
+        line_thickness
+    )
+    
+    # 간판 이미지 합성 (알파 블렌딩)
+    if text_layer is not None:
+        # 야간 모드이고 발광 효과가 적용된 경우: signboard_resized 사용 (발광 효과 유지)
+        if night_mode and sign_type in ["전광채널", "후광채널", "전후광채널"]:
+            # 발광 효과가 적용된 signboard_resized를 배경에 합성
+            # text_layer의 알파 채널을 마스크로 사용
+            text_layer_resized = cv2.resize(text_layer, (frame_width, frame_height), interpolation=cv2.INTER_LINEAR)
+            alpha = text_layer_resized[:, :, 3:4].astype(np.float32) / 255.0
+            alpha_3ch = np.repeat(alpha, 3, axis=2)
+            
+            # 배경과 합성 (발광 효과가 적용된 signboard_resized 사용)
+            canvas_region = canvas_context_np[frame_y:frame_y + frame_height, frame_x:frame_x + frame_width].astype(np.float32)
+            blended = canvas_region * (1 - alpha_3ch) + signboard_resized.astype(np.float32) * alpha_3ch
+            canvas_context_np[frame_y:frame_y + frame_height, frame_x:frame_x + frame_width] = blended.astype(np.uint8)
+        else:
+            # 주간 모드: 기존 방식 (text_layer 사용)
+            text_layer_resized = cv2.resize(text_layer, (frame_width, frame_height), interpolation=cv2.INTER_LINEAR)
+            alpha = text_layer_resized[:, :, 3:4].astype(np.float32) / 255.0
+            alpha_3ch = np.repeat(alpha, 3, axis=2)
+            
+            text_rgb = text_layer_resized[:, :, :3]
+            
+            # 배경과 합성
+            canvas_region = canvas_context_np[frame_y:frame_y + frame_height, frame_x:frame_x + frame_width].astype(np.float32)
+            canvas_region_rgb = cv2.cvtColor(canvas_region.astype(np.uint8), cv2.COLOR_BGR2RGB)
+            
+            blended_rgb = canvas_region_rgb * (1 - alpha_3ch) + text_rgb * alpha_3ch
+            blended_bgr = cv2.cvtColor(blended_rgb.astype(np.uint8), cv2.COLOR_RGB2BGR)
+            canvas_context_np[frame_y:frame_y + frame_height, frame_x:frame_x + frame_width] = blended_bgr
+    else:
+        # text_layer가 없으면 검정 배경 처리 (기존 방식)
+        signboard_gray = cv2.cvtColor(signboard_resized, cv2.COLOR_BGR2GRAY)
+        _, mask = cv2.threshold(signboard_gray, 10, 255, cv2.THRESH_BINARY)
+        mask = mask.astype(np.float32) / 255.0
+        mask_3ch = np.stack([mask, mask, mask], axis=2)
+        
+        canvas_region = canvas_context_np[frame_y:frame_y + frame_height, frame_x:frame_x + frame_width].astype(np.float32)
+        blended = (signboard_resized.astype(np.float32) * mask_3ch + canvas_region * (1 - mask_3ch)).astype(np.uint8)
+        canvas_context_np[frame_y:frame_y + frame_height, frame_x:frame_x + frame_width] = blended
+    
+    # 6. 치수 표시 (두 이미지 모두)
+    dimensions_dict = {}
+    if show_dimensions:
+        # 치수 계산 (mm 단위, region_width_mm/height_mm가 없으면 픽셀 기준 추정)
+        if region_width_mm is None:
+            # 픽셀을 mm로 변환 (대략 96 DPI 기준: 1px ≈ 0.264583mm)
+            region_width_mm = int(region_width_px * 0.264583)
+        if region_height_mm is None:
+            region_height_mm = int(region_height_px * 0.264583)
+        
+        # 스케일 계산 (px당 mm) - 올바른 계산
+        scale_mm_per_px = region_width_mm / region_width_px if region_width_px > 0 else 0.264583
+        if scale_mm_per_px < 0.1:
+            scale_text = f"1px = {scale_mm_per_px * 1000:.1f}μm"
+        elif scale_mm_per_px < 1:
+            scale_text = f"1px = {scale_mm_per_px:.2f}mm"
+        else:
+            scale_text = f"1px = {scale_mm_per_px:.1f}mm"
+        
+        dimensions_dict = {
+            "width_mm": int(region_width_mm),
+            "height_mm": int(region_height_mm),
+            "scale": scale_text
+        }
+        
+        # 치수선 색상 및 설정
+        dimension_color = (100, 100, 100)  # 어두운 회색 (BGR)
+        dimension_thickness = 2
+        tip_length = 0.04
+        
+        # 치수선 오프셋 (프레임 외부)
+        dim_offset = 15
+        
+        # 화살표 좌표 계산
+        arrow_y = frame_y - dim_offset  # 상단 가로 치수선
+        arrow_x = frame_x + frame_width + dim_offset  # 우측 세로 치수선
+        
+        # Mode A에 치수선 추가 (양방향 화살표)
+        # 상단 가로 치수선
+        cv2.arrowedLine(
+            canvas_design_np,
+            (frame_x, arrow_y),
+            (frame_x + frame_width, arrow_y),
+            dimension_color,
+            dimension_thickness,
+            tipLength=tip_length
+        )
+        cv2.arrowedLine(
+            canvas_design_np,
+            (frame_x + frame_width, arrow_y),
+            (frame_x, arrow_y),
+            dimension_color,
+            dimension_thickness,
+            tipLength=tip_length
+        )
+        
+        # 우측 세로 치수선
+        cv2.arrowedLine(
+            canvas_design_np,
+            (arrow_x, frame_y),
+            (arrow_x, frame_y + frame_height),
+            dimension_color,
+            dimension_thickness,
+            tipLength=tip_length
+        )
+        cv2.arrowedLine(
+            canvas_design_np,
+            (arrow_x, frame_y + frame_height),
+            (arrow_x, frame_y),
+            dimension_color,
+            dimension_thickness,
+            tipLength=tip_length
+        )
+        
+        # Mode B에 치수선 추가 (양방향 화살표)
+        cv2.arrowedLine(
+            canvas_context_np,
+            (frame_x, arrow_y),
+            (frame_x + frame_width, arrow_y),
+            dimension_color,
+            dimension_thickness,
+            tipLength=tip_length
+        )
+        cv2.arrowedLine(
+            canvas_context_np,
+            (frame_x + frame_width, arrow_y),
+            (frame_x, arrow_y),
+            dimension_color,
+            dimension_thickness,
+            tipLength=tip_length
+        )
+        cv2.arrowedLine(
+            canvas_context_np,
+            (arrow_x, frame_y),
+            (arrow_x, frame_y + frame_height),
+            dimension_color,
+            dimension_thickness,
+            tipLength=tip_length
+        )
+        cv2.arrowedLine(
+            canvas_context_np,
+            (arrow_x, frame_y + frame_height),
+            (arrow_x, frame_y),
+            dimension_color,
+            dimension_thickness,
+            tipLength=tip_length
+        )
+        
+        # 한글 폰트 로드 (PIL 사용)
+        font_size = 18
+        font = get_korean_font(font_size)
+        
+        # 치수 텍스트
+        width_text = f"{int(region_width_mm)}mm"
+        height_text = f"{int(region_height_mm)}mm"
+        
+        # PIL 이미지로 변환
+        design_img_pil = Image.fromarray(cv2.cvtColor(canvas_design_np, cv2.COLOR_BGR2RGB))
+        context_img_pil = Image.fromarray(cv2.cvtColor(canvas_context_np, cv2.COLOR_BGR2RGB))
+        
+        draw_design = ImageDraw.Draw(design_img_pil)
+        draw_context = ImageDraw.Draw(context_img_pil)
+        
+        # 텍스트 위치 (화살표 중간/위)
+        width_text_x = frame_x + frame_width // 2
+        width_text_y = arrow_y - 25
+        
+        height_text_x = arrow_x + 10
+        height_text_y = frame_y + frame_height // 2
+        
+        # Halo 효과와 함께 텍스트 그리기
+        def draw_text_with_halo(draw, x, y, text, font, fill_color=(100, 100, 100), halo_color=(255, 255, 255)):
+            """Halo 효과가 있는 텍스트 그리기"""
+            for dx in [-1, 0, 1]:
+                for dy in [-1, 0, 1]:
+                    if dx != 0 or dy != 0:
+                        draw.text((x + dx, y + dy), text, fill=halo_color, font=font)
+            draw.text((x, y), text, fill=fill_color, font=font)
+        
+        # Mode A에 치수 텍스트 표시
+        draw_text_with_halo(draw_design, width_text_x, width_text_y, width_text, font, (100, 100, 100), (255, 255, 255))
+        draw_text_with_halo(draw_design, height_text_x, height_text_y, height_text, font, (100, 100, 100), (255, 255, 255))
+        
+        # Mode B에 치수 텍스트 표시 (Halo 효과로 가독성 향상)
+        draw_text_with_halo(draw_context, width_text_x, width_text_y, width_text, font, (255, 255, 255), (0, 0, 0))
+        draw_text_with_halo(draw_context, height_text_x, height_text_y, height_text, font, (255, 255, 255), (0, 0, 0))
+        
+        # BGR로 다시 변환
+        canvas_design_np = cv2.cvtColor(np.array(design_img_pil), cv2.COLOR_RGB2BGR)
+        canvas_context_np = cv2.cvtColor(np.array(context_img_pil), cv2.COLOR_RGB2BGR)
+    else:
+        dimensions_dict = {
+            "width_mm": int(region_width_mm) if region_width_mm else int(region_width_px * 0.264583),
+            "height_mm": int(region_height_mm) if region_height_mm else int(region_height_px * 0.264583),
+            "scale": "N/A"
+        }
+    
+    return canvas_design_np, canvas_context_np, dimensions_dict
 
 def composite_signboard(
     building_photo: np.ndarray,
@@ -2816,6 +3609,281 @@ async def generate_simulation(
             {"error": str(e), "traceback": traceback.format_exc()},
             status_code=500
         )
+
+@app.post("/api/generate-hq")
+async def generate_hq(
+    building_photo: str = Form(...),
+    polygon_points: str = Form(...),
+    signboard_input_type: str = Form("text"),
+    text: str = Form(""),
+    logo: str = Form(""),
+    logo_type: str = Form("channel"),
+    signboard_image: str = Form(""),
+    installation_type: str = Form("맨벽"),
+    sign_type: str = Form(...),
+    bg_color: str = Form(...),
+    text_color: str = Form(...),
+    text_direction: str = Form("horizontal"),
+    font_size: int = Form(100),
+    text_position_x: int = Form(50),
+    text_position_y: int = Form(50),
+    orientation: str = Form("auto"),
+    flip_horizontal: str = Form("false"),
+    flip_vertical: str = Form("false"),
+    rotate90: int = Form(0),
+    rotation: float = Form(0.0),
+    remove_white_bg: str = Form("false"),
+    lights: str = Form("[]"),
+    lights_enabled: str = Form("true"),
+    signboards: str = Form(None)
+):
+    """
+    Phase 1 (CG 생성) + Phase 2 (pix2pix 개선) - AI 고품질 모드
+    """
+    try:
+        # 1. pix2pix 모델 확인
+        ai_engine = get_pix2pix_engine()
+        if ai_engine is None:
+            return JSONResponse(
+                status_code=503,
+                content={"error": "Pix2pix 모델을 사용할 수 없습니다. 모델 파일과 의존성을 확인하세요."}
+            )
+        
+        # 2. Phase 1: 간판 이미지 생성 (건물에 합성하기 전의 순수 간판)
+        building_img = base64_to_image(building_photo)
+        points = json.loads(polygon_points)
+        
+        # 간판 영역 크기 계산 (기존 generate_simulation 로직 재사용)
+        if len(points) == 4:
+            ordered = order_points(points)
+            top_width = np.sqrt((ordered[1][0] - ordered[0][0])**2 + (ordered[1][1] - ordered[0][1])**2)
+            left_height = np.sqrt((ordered[3][0] - ordered[0][0])**2 + (ordered[3][1] - ordered[0][1])**2)
+            region_width = int(top_width)
+            region_height = int(left_height)
+        else:
+            xs = [p[0] for p in points]
+            ys = [p[1] for p in points]
+            region_width = int(max(xs) - min(xs))
+            region_height = int(max(ys) - min(ys))
+        
+        region_width = max(300, region_width)
+        region_height = max(100, region_height)
+        
+        if orientation == "vertical":
+            region_width, region_height = region_height, region_width
+        
+        # Phase 1 간판 렌더링 (순수 간판만, 건물 배경 없음)
+        if signboard_input_type == "image" and signboard_image:
+            uploaded_img = base64_to_image(signboard_image)
+            # 회전/플립 처리 (기존 로직 재사용)
+            if rotate90 == 90:
+                uploaded_img = cv2.rotate(uploaded_img, cv2.ROTATE_90_CLOCKWISE)
+            elif rotate90 == 180:
+                uploaded_img = cv2.rotate(uploaded_img, cv2.ROTATE_180)
+            elif rotate90 == 270:
+                uploaded_img = cv2.rotate(uploaded_img, cv2.ROTATE_90_COUNTERCLOCKWISE)
+            
+            if flip_horizontal.lower() == "true":
+                uploaded_img = cv2.flip(uploaded_img, 1)
+            if flip_vertical.lower() == "true":
+                uploaded_img = cv2.flip(uploaded_img, 0)
+            
+            phase1_signboard = cv2.resize(uploaded_img, (region_width, region_height))
+        else:
+            # 텍스트/로고로 간판 생성 (Pix2Pix 추론용: 배경색 포함)
+            phase1_signboard, _ = render_signboard(
+                text, logo, logo_type, installation_type, sign_type,
+                bg_color, text_color, text_direction, font_size,
+                text_position_x, text_position_y, region_width, region_height,
+                use_actual_bg_for_training=True,  # True로 변경: 학습과 동일한 형태
+                lights_enabled=(lights_enabled.lower() == "true")
+            )
+        
+        # 3. pix2pix로 개선 (원본 크기 그대로)
+        logger.info(f"[AI 고품질] pix2pix 추론 시작: 간판 크기 {phase1_signboard.shape[1]}x{phase1_signboard.shape[0]}")
+        
+        # 디버그: phase1_signboard 이미지 저장 (글자가 제대로 그려졌는지 확인)
+        debug_path = os.path.join(os.path.dirname(__file__), "debug_input.png")
+        cv2.imwrite(debug_path, phase1_signboard)
+        logger.info(f"[AI 고품질] 디버그 이미지 저장: {debug_path}, shape={phase1_signboard.shape}, min={phase1_signboard.min()}, max={phase1_signboard.max()}, mean={phase1_signboard.mean():.2f}")
+        
+        enhanced_signboard = ai_engine.enhance(phase1_signboard)
+        logger.info(f"[AI 고품질] pix2pix 추론 완료: 결과 크기 {enhanced_signboard.shape}")
+        
+        # 3-1. 맨벽/프레임바일 때 배경을 검정으로 변경 (합성용)
+        if installation_type in ["맨벽", "프레임바"]:
+            # 배경색을 BGR로 변환
+            bg_rgb = hex_to_rgb(bg_color) if bg_color.startswith('#') else (107, 45, 143)
+            bg_bgr = (bg_rgb[2], bg_rgb[1], bg_rgb[0])  # RGB -> BGR
+            
+            # 배경색과 유사한 픽셀 찾기
+            diff = np.abs(enhanced_signboard.astype(np.float32) - np.array(bg_bgr, dtype=np.float32))
+            similarity = np.sum(diff, axis=2) < 50  # 임계값: 50 (필요시 조정 가능)
+            
+            # 배경 영역을 검정으로 변경
+            enhanced_signboard[similarity] = [0, 0, 0]
+            logger.info(f"[AI 고품질] 배경 검정 처리 완료: {similarity.sum()} 픽셀")
+        
+        # 4. 건물 사진에 합성 (기존 composite_signboard 로직 재사용, 리사이즈 불필요)
+        lights_list = json.loads(lights) if lights else []
+        lights_on = lights_enabled.lower() != "false"
+        
+        final_day, final_night = composite_signboard(
+            building_img, enhanced_signboard, points, sign_type,
+            text_layer=None, lights=lights_list, lights_enabled=lights_on,
+            installation_type=installation_type
+        )
+        
+        # 6. Base64로 인코딩하여 반환
+        return {
+            "day_simulation": image_to_base64(final_day),
+            "night_simulation": image_to_base64(final_night) if final_night is not None else image_to_base64(final_day),
+            "processing_time": 0  # TODO: 실제 처리 시간 측정
+        }
+        
+    except Exception as e:
+        logger.error(f"AI 고품질 생성 실패: {e}", exc_info=True)
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+@app.post("/api/generate-flat-design")
+async def generate_flat_design_api(
+    building_photo: str = Form(...),  # 원본 건물 사진
+    polygon_points: str = Form(...),
+    signboard_input_type: str = Form("text"),
+    text: str = Form(""),
+    logo: str = Form(""),
+    logo_type: str = Form("channel"),
+    signboard_image: str = Form(""),
+    installation_type: str = Form("맨벽"),
+    sign_type: str = Form(...),
+    bg_color: str = Form(...),
+    text_color: str = Form(...),
+    text_direction: str = Form("horizontal"),
+    font_size: int = Form(100),
+    text_position_x: int = Form(50),
+    text_position_y: int = Form(50),
+    orientation: str = Form("auto"),
+    flip_horizontal: str = Form("false"),
+    flip_vertical: str = Form("false"),
+    rotate90: int = Form(0),
+    rotation: float = Form(0.0),
+    lights_enabled: str = Form("true"),
+    show_dimensions: str = Form("true"),  # 치수 표시 여부
+    region_width_mm: float = Form(None),  # 실제 영역 너비 (mm, 선택사항)
+    region_height_mm: float = Form(None),  # 실제 영역 높이 (mm, 선택사항)
+    mode: str = Form("day"),  # 주간/야간 모드 ("day" 또는 "night")
+):
+    """
+    평면 시안 생성: 원본 건물 사진에서 폴리곤 영역을 정면으로 펴서 간판 시안 합성
+    """
+    try:
+        # 1. 원본 건물 사진 디코딩
+        building_img = base64_to_image(building_photo)
+        
+        # 2. 폴리곤 포인트 파싱
+        points = json.loads(polygon_points)
+        
+        # 3. 간판 영역 크기 계산
+        if len(points) == 4:
+            ordered = order_points(points)
+            top_width = np.sqrt((ordered[1][0] - ordered[0][0])**2 + (ordered[1][1] - ordered[0][1])**2)
+            left_height = np.sqrt((ordered[3][0] - ordered[0][0])**2 + (ordered[3][1] - ordered[0][1])**2)
+            region_width = int(top_width)
+            region_height = int(left_height)
+        else:
+            xs = [p[0] for p in points]
+            ys = [p[1] for p in points]
+            region_width = int(max(xs) - min(xs))
+            region_height = int(max(ys) - min(ys))
+        
+        region_width = max(300, region_width)
+        region_height = max(100, region_height)
+        
+        if orientation == "vertical":
+            region_width, region_height = region_height, region_width
+        
+        # 4. 간판 이미지 생성
+        text_layer = None
+        if signboard_input_type == "image" and signboard_image:
+            uploaded_img = base64_to_image(signboard_image)
+            # 회전/플립 처리
+            if rotate90 == 90:
+                uploaded_img = cv2.rotate(uploaded_img, cv2.ROTATE_90_CLOCKWISE)
+            elif rotate90 == 180:
+                uploaded_img = cv2.rotate(uploaded_img, cv2.ROTATE_180)
+            elif rotate90 == 270:
+                uploaded_img = cv2.rotate(uploaded_img, cv2.ROTATE_90_COUNTERCLOCKWISE)
+            
+            if flip_horizontal.lower() == "true":
+                uploaded_img = cv2.flip(uploaded_img, 1)
+            if flip_vertical.lower() == "true":
+                uploaded_img = cv2.flip(uploaded_img, 0)
+            
+            signboard_img = cv2.resize(uploaded_img, (region_width, region_height))
+        else:
+            # 텍스트/로고로 간판 생성 (흰색 배경 옵션 사용)
+            signboard_img, text_layer = render_signboard(
+                text, logo, logo_type, installation_type, sign_type,
+                bg_color, text_color, text_direction, font_size,
+                text_position_x, text_position_y, region_width, region_height,
+                use_actual_bg_for_training=False,
+                lights_enabled=(lights_enabled.lower() == "true"),
+                white_background=True  # 흰색 배경 강제
+            )
+            # text_layer가 BGR 형식이면 RGBA로 변환 필요
+            if text_layer is not None:
+                # text_layer가 이미 RGBA인지 확인
+                if len(text_layer.shape) == 3 and text_layer.shape[2] == 3:
+                    # BGR -> RGB -> RGBA 변환 (알파 채널 추가)
+                    h, w = text_layer.shape[:2]
+                    text_layer_rgb = cv2.cvtColor(text_layer, cv2.COLOR_BGR2RGB)
+                    text_layer_rgba = np.zeros((h, w, 4), dtype=np.uint8)
+                    text_layer_rgba[:, :, :3] = text_layer_rgb
+                    # 알파 채널: 텍스트가 있는 부분만 불투명
+                    gray = cv2.cvtColor(text_layer, cv2.COLOR_BGR2GRAY)
+                    text_layer_rgba[:, :, 3] = (gray > 10).astype(np.uint8) * 255
+                    text_layer = text_layer_rgba
+                elif len(text_layer.shape) == 3 and text_layer.shape[2] == 4:
+                    # 이미 RGBA인 경우, BGR -> RGB 변환 필요
+                    text_layer_rgb = cv2.cvtColor(text_layer[:, :, :3], cv2.COLOR_BGR2RGB)
+                    text_layer_rgba = np.zeros((text_layer.shape[0], text_layer.shape[1], 4), dtype=np.uint8)
+                    text_layer_rgba[:, :, :3] = text_layer_rgb
+                    text_layer_rgba[:, :, 3] = text_layer[:, :, 3]  # 알파 채널 유지
+                    text_layer = text_layer_rgba
+        
+        # 5. 평면 시안 생성 (두 가지 모드: design_only, with_context)
+        night_mode = (mode.lower() == "night")
+        design_only, with_context, dimensions = generate_dual_flat_design(
+            building_photo=building_img,  # 원본 건물 사진 전달
+            polygon_points=points,
+            signboard_image=signboard_img,
+            text_layer=text_layer,  # 알파 블렌딩용 (전광채널/후광채널/전후광채널인 경우만)
+            frame_line_color=(180, 180, 180),  # 회색 프레임
+            background_color=(255, 255, 255),    # 흰색 배경
+            padding_ratio=0.1,                    # 10% 여백
+            show_dimensions=(show_dimensions.lower() == "true"),  # 치수 표시
+            region_width_mm=region_width_mm if region_width_mm else None,  # 사용자 입력 치수 (mm)
+            region_height_mm=region_height_mm if region_height_mm else None,  # 사용자 입력 치수 (mm)
+            region_width_px=region_width,  # 실제 영역 크기 전달 (픽셀)
+            region_height_px=region_height,  # 실제 영역 크기 전달 (픽셀)
+            night_mode=night_mode,  # 야간 모드
+            sign_type=sign_type  # 간판 종류 (발광 효과용)
+        )
+        
+        # 6. Base64로 인코딩하여 반환
+        return {
+            "design_only": image_to_base64(design_only),
+            "with_context": image_to_base64(with_context),
+            "dimensions": dimensions,
+            "width": design_only.shape[1],
+            "height": design_only.shape[0],
+            "region_width": region_width,
+            "region_height": region_height
+        }
+        
+    except Exception as e:
+        logger.error(f"평면 시안 생성 실패: {e}", exc_info=True)
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
 # AI 브랜딩 시스템 초기화
 if AI_BRANDING_AVAILABLE:

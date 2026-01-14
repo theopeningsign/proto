@@ -390,6 +390,48 @@ const SignboardForm = ({ formData, onFormDataChange, section = 'full' }) => {
             💡 자동: 선택한 영역에 맞춰 최적의 방향 선택 | 가로/세로: 강제로 지정
           </p>
         </div>
+
+        {/* 치수 입력 (평면도용) */}
+        <div className="md:col-span-2">
+          <label className="block text-sm font-medium text-gray-300 mb-2">
+            평면도 치수 (mm, 선택사항)
+          </label>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">너비</label>
+              <div className="relative">
+                <input
+                  type="number"
+                  value={formData.width_mm || ''}
+                  onChange={(e) => handleChange('width_mm', e.target.value ? parseFloat(e.target.value) : null)}
+                  placeholder="자동 계산"
+                  min="0"
+                  step="1"
+                  className="w-full bg-transparent border border-white/20 rounded-lg px-4 py-2 pr-12 text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none transition-colors"
+                />
+                <span className="absolute right-3 top-2 text-gray-400 text-sm">mm</span>
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">높이</label>
+              <div className="relative">
+                <input
+                  type="number"
+                  value={formData.height_mm || ''}
+                  onChange={(e) => handleChange('height_mm', e.target.value ? parseFloat(e.target.value) : null)}
+                  placeholder="자동 계산"
+                  min="0"
+                  step="1"
+                  className="w-full bg-transparent border border-white/20 rounded-lg px-4 py-2 pr-12 text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none transition-colors"
+                />
+                <span className="absolute right-3 top-2 text-gray-400 text-sm">mm</span>
+              </div>
+            </div>
+          </div>
+          <p className="mt-2 text-xs text-gray-500">
+            💡 팁: 실제 제작 치수를 입력하면 정확한 스케일(1px = Xmm)이 표시됩니다
+          </p>
+        </div>
         </>
         )}
       </div>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import ImageUploader from './ImageUploader';
 import SignboardForm from './SignboardForm';
@@ -28,7 +28,10 @@ const SignboardGeneratorTab = ({ savedBrandings }) => {
     flipVertical: false,
     rotate90: 0,
     rotation: 0.0,
-    removeWhiteBg: false
+    removeWhiteBg: false,
+    // 치수 필드 추가 (평면도용)
+    width_mm: null,  // null이면 자동 계산
+    height_mm: null   // null이면 자동 계산
   });
 
   // 독립 사용을 위해 기본 간판 초기화
@@ -222,6 +225,180 @@ const SignboardGeneratorTab = ({ savedBrandings }) => {
     );
   };
 
+  // 이미지를 base64로 변환하는 헬퍼 함수
+  const imageToBase64 = (file) => {
+    return new Promise((resolve, reject) => {
+      if (typeof file === 'string') {
+        // 이미 base64 문자열인 경우
+        resolve(file);
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  };
+
+  // 평면도 생성 함수
+  const handleFlatDesignGenerate = async (mode = 'day') => {
+    console.log('[평면도 생성] 함수 호출됨 - handleFlatDesignGenerate');
+    console.log('[평면도 생성] buildingImage:', buildingImage);
+    console.log('[평면도 생성] currentSignboardId:', currentSignboardId);
+    console.log('[평면도 생성] signboards:', signboards);
+    
+    if (!buildingImage) {
+      console.log('[평면도 생성] buildingImage 없음');
+      alert('건물 사진을 업로드해주세요.');
+      return;
+    }
+
+    const currentSignboard = getCurrentSignboard();
+    console.log('[평면도 생성] currentSignboard:', currentSignboard);
+    
+    if (!currentSignboard) {
+      console.log('[평면도 생성] currentSignboard 없음');
+      alert('활성화된 간판을 선택해주세요.');
+      return;
+    }
+
+    if (!currentSignboard.selectedArea) {
+      console.log('[평면도 생성] selectedArea 없음');
+      alert('간판 영역을 선택해주세요.');
+      return;
+    }
+
+    console.log('[평면도 생성] 검증 통과, API 호출 시작');
+    setLoading(true);
+    setLoadingPhase('flat');
+
+    try {
+      console.log('[평면도 생성] buildingImage 변환 시작');
+      const buildingBase64 = await imageToBase64(buildingImage);
+      console.log('[평면도 생성] buildingImage 변환 완료');
+      
+      const formDataToSend = new FormData();
+      formDataToSend.append('building_photo', buildingBase64);
+      
+      // 폴리곤 포인트 변환
+      let points;
+      if (currentSignboard.selectedArea.type === 'polygon') {
+        points = currentSignboard.selectedArea.points.map((p) => [p.x, p.y]);
+      } else {
+        points = [
+          [currentSignboard.selectedArea.x, currentSignboard.selectedArea.y],
+          [currentSignboard.selectedArea.x + currentSignboard.selectedArea.width, currentSignboard.selectedArea.y],
+          [currentSignboard.selectedArea.x + currentSignboard.selectedArea.width, currentSignboard.selectedArea.y + currentSignboard.selectedArea.height],
+          [currentSignboard.selectedArea.x, currentSignboard.selectedArea.y + currentSignboard.selectedArea.height]
+        ];
+      }
+      formDataToSend.append('polygon_points', JSON.stringify(points));
+      console.log('[평면도 생성] 폴리곤 포인트:', points);
+
+      // 간판 정보 추가
+      const sbForm = currentSignboard.formData;
+      formDataToSend.append('signboard_input_type', sbForm.signboardInputType || 'text');
+      formDataToSend.append('text', sbForm.text || '');
+      
+      if (sbForm.logo) {
+        const logoBase64 = await imageToBase64(sbForm.logo);
+        formDataToSend.append('logo', logoBase64);
+      } else {
+        formDataToSend.append('logo', '');
+      }
+      
+      formDataToSend.append('logo_type', sbForm.logoType || 'channel');
+      
+      if (sbForm.signboardImage) {
+        const signboardImageBase64 = await imageToBase64(sbForm.signboardImage);
+        formDataToSend.append('signboard_image', signboardImageBase64);
+      } else {
+        formDataToSend.append('signboard_image', '');
+      }
+      
+      formDataToSend.append('installation_type', sbForm.installationType || '맨벽');
+      formDataToSend.append('sign_type', sbForm.signType || '전광채널');
+      formDataToSend.append('bg_color', sbForm.bgColor || '#6B2D8F');
+      formDataToSend.append('text_color', sbForm.textColor || '#FFFFFF');
+      formDataToSend.append('text_direction', sbForm.textDirection || 'horizontal');
+      formDataToSend.append('font_size', sbForm.fontSize || 100);
+      formDataToSend.append('text_position_x', sbForm.textPositionX || 50);
+      formDataToSend.append('text_position_y', sbForm.textPositionY || 50);
+      formDataToSend.append('orientation', sbForm.orientation || 'auto');
+      formDataToSend.append('flip_horizontal', sbForm.flipHorizontal ? 'true' : 'false');
+      formDataToSend.append('flip_vertical', sbForm.flipVertical ? 'true' : 'false');
+      formDataToSend.append('rotate90', sbForm.rotate90 || 0);
+      formDataToSend.append('rotation', sbForm.rotation || 0.0);
+      formDataToSend.append('lights_enabled', 'false');
+      formDataToSend.append('show_dimensions', 'true');
+      formDataToSend.append('mode', mode || 'day');  // 주간/야간 모드
+
+      // 치수 값 추가 (있으면 전달, 없으면 생략)
+      if (sbForm.width_mm) {
+        formDataToSend.append('region_width_mm', sbForm.width_mm);
+      }
+      if (sbForm.height_mm) {
+        formDataToSend.append('region_height_mm', sbForm.height_mm);
+      }
+
+      console.log('[평면도 생성] API 호출 시작:', 'http://localhost:8000/api/generate-flat-design');
+      const response = await fetch('http://localhost:8000/api/generate-flat-design', {
+        method: 'POST',
+        body: formDataToSend
+      });
+
+      console.log('[평면도 생성] API 응답 상태:', response.status, response.statusText);
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[평면도 생성] API 에러 응답:', errorText);
+        throw new Error(`서버 오류: ${response.status} ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      console.log('[평면도 생성] API 응답 데이터:', data);
+      
+      if (data.error) {
+        throw new Error(data.error);
+      }
+
+      if (!data.design_only || !data.with_context) {
+        throw new Error('평면도 이미지가 응답에 없습니다.');
+      }
+
+      // results에 두 가지 모드의 평면도 추가 (results가 null이어도 처리)
+      setResults(prev => {
+        if (prev) {
+          return {
+            ...prev,
+            flat_design: data.design_only,  // 기본값: design_only (하위 호환성)
+            flat_design_only: data.design_only,  // 흰색 배경 + 간판만
+            flat_design_with_context: data.with_context,  // 건물 외벽 + 간판 합성
+            flat_design_dimensions: data.dimensions || {}  // 치수 정보
+          };
+        } else {
+          return {
+            day_simulation: '',
+            night_simulation: '',
+            flat_design: data.design_only,
+            flat_design_only: data.design_only,
+            flat_design_with_context: data.with_context,
+            flat_design_dimensions: data.dimensions || {}
+          };
+        }
+      });
+      
+      console.log('[평면도 생성] 완료!');
+
+    } catch (error) {
+      console.error('[평면도 생성] 에러 발생:', error);
+      alert(`평면도 생성 실패: ${error.message}\n\n브라우저 콘솔을 확인해주세요.`);
+    } finally {
+      setLoading(false);
+      setLoadingPhase(null);
+    }
+  };
+
   return (
     <div className="space-y-8">
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
@@ -382,6 +559,12 @@ const SignboardGeneratorTab = ({ savedBrandings }) => {
             lightsEnabled={lightsEnabled}
             onLightsEnabledChange={setLightsEnabled}
             onShowComingSoon={() => setShowComingSoonModal(true)}
+            onFlatDesignGenerate={(() => {
+              console.log('[SignboardGeneratorTab] onFlatDesignGenerate prop 전달 시점');
+              console.log('[SignboardGeneratorTab] handleFlatDesignGenerate 존재:', typeof handleFlatDesignGenerate);
+              console.log('[SignboardGeneratorTab] handleFlatDesignGenerate 값:', handleFlatDesignGenerate);
+              return handleFlatDesignGenerate;
+            })()}
           />
         </motion.div>
       </div>

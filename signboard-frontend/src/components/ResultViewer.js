@@ -5,6 +5,7 @@ import SignboardTransform from './SignboardTransform';
 const ResultViewer = ({
   results,
   loading,
+  loadingPhase = null,
   lights = [],
   onLightsChange = () => {},
   lightsEnabled = true,
@@ -12,8 +13,24 @@ const ResultViewer = ({
   onApplyLights = () => {},
   signboards = [],
   onRegenerateWithTransforms = () => {},
-  textSizeInfo = null
+  textSizeInfo = null,
+  onFlatDesignGenerate = () => {}
 }) => {
+  // props 확인용 로그 - 컴포넌트 마운트 시점
+  React.useEffect(() => {
+    console.log('[ResultViewer] 컴포넌트 마운트 - onFlatDesignGenerate prop 확인');
+    console.log('[ResultViewer] 타입:', typeof onFlatDesignGenerate);
+    console.log('[ResultViewer] 값:', onFlatDesignGenerate);
+    console.log('[ResultViewer] 기본값인가?', onFlatDesignGenerate.toString() === '() => {}');
+    console.log('[ResultViewer] 함수인가?', typeof onFlatDesignGenerate === 'function');
+  }, []);
+  
+  // prop 변경 시 로그
+  React.useEffect(() => {
+    if (onFlatDesignGenerate && onFlatDesignGenerate.toString() !== '() => {}') {
+      console.log('[ResultViewer] onFlatDesignGenerate prop이 제대로 전달되었습니다!');
+    }
+  }, [onFlatDesignGenerate]);
   const [viewMode, setViewMode] = useState('day'); // 'day' | 'night'
   const [selectedLightId, setSelectedLightId] = useState(null);
   const [showTransform, setShowTransform] = useState(false);
@@ -670,7 +687,7 @@ const ResultViewer = ({
         </div>
       )}
 
-      <div className="flex gap-3 mb-6">
+      <div className="flex gap-3 mb-3">
         <button
           onClick={() => {
             const link = document.createElement('a');
@@ -697,6 +714,99 @@ const ResultViewer = ({
         >
           야간 다운로드
         </button>
+      </div>
+
+      {/* 평면도 생성 및 다운로드 버튼 */}
+      <div className="flex flex-col gap-3 mb-6">
+        {results && (results.flat_design_only || results.flat_design) ? (
+          <>
+            {/* 주간/야간 선택 버튼 */}
+            <div className="flex gap-2 mb-2">
+              <button
+                onClick={() => {
+                  if (onFlatDesignGenerate && typeof onFlatDesignGenerate === 'function' && onFlatDesignGenerate.toString() !== '() => {}') {
+                    onFlatDesignGenerate('day');
+                  }
+                }}
+                className="flex-1 bg-yellow-500/80 hover:bg-yellow-500 text-white font-medium py-2 px-4 rounded-lg transition-all text-sm"
+                title="주간 평면도"
+              >
+                ☀️ 주간
+              </button>
+              <button
+                onClick={() => {
+                  if (onFlatDesignGenerate && typeof onFlatDesignGenerate === 'function' && onFlatDesignGenerate.toString() !== '() => {}') {
+                    onFlatDesignGenerate('night');
+                  }
+                }}
+                className="flex-1 bg-indigo-500/80 hover:bg-indigo-500 text-white font-medium py-2 px-4 rounded-lg transition-all text-sm"
+                title="야간 평면도"
+              >
+                🌙 야간
+              </button>
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  const link = document.createElement('a');
+                  link.href = results.flat_design_only || results.flat_design;
+                  link.download = 'flat_design_only.png';
+                  document.body.appendChild(link);
+                  link.click();
+                  document.body.removeChild(link);
+                }}
+                className="flex-1 bg-green-500/80 hover:bg-green-500 text-white font-medium py-3 px-4 rounded-lg transition-all hover:scale-105"
+                title="흰색 배경 + 간판만 (도면용)"
+              >
+                📐 도면용 다운로드
+              </button>
+              {results.flat_design_with_context && (
+                <button
+                  onClick={() => {
+                    const link = document.createElement('a');
+                    link.href = results.flat_design_with_context;
+                    link.download = 'flat_design_with_context.png';
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                  }}
+                  className="flex-1 bg-blue-500/80 hover:bg-blue-500 text-white font-medium py-3 px-4 rounded-lg transition-all hover:scale-105"
+                  title="건물 외벽 + 간판 합성 (시공 도면용)"
+                >
+                🏗️ 시공 도면 다운로드
+                </button>
+              )}
+            </div>
+          </>
+        ) : (
+          <button
+            onClick={() => {
+              console.log('[ResultViewer] 평면도 생성 버튼 클릭됨');
+              console.log('[ResultViewer] onFlatDesignGenerate:', onFlatDesignGenerate);
+              console.log('[ResultViewer] onFlatDesignGenerate 타입:', typeof onFlatDesignGenerate);
+              console.log('[ResultViewer] 기본값인가?', onFlatDesignGenerate.toString() === '() => {}');
+              
+              if (onFlatDesignGenerate && typeof onFlatDesignGenerate === 'function' && onFlatDesignGenerate.toString() !== '() => {}') {
+                console.log('[ResultViewer] 함수 호출 시작');
+                onFlatDesignGenerate('day');
+              } else {
+                console.error('[ResultViewer] onFlatDesignGenerate가 전달되지 않았습니다!');
+                console.error('[ResultViewer] 현재 값:', onFlatDesignGenerate);
+                alert('평면도 생성 함수가 연결되지 않았습니다. 페이지를 새로고침해주세요.');
+              }
+            }}
+            disabled={loading}
+            className="flex-1 bg-green-500/80 hover:bg-green-500 disabled:bg-gray-500/50 disabled:cursor-not-allowed text-white font-medium py-3 px-4 rounded-lg transition-all hover:scale-105"
+          >
+            {loading && loadingPhase === 'flat' ? '생성 중...' : '📐 평면도 생성'}
+          </button>
+        )}
+        {results && results.flat_design_dimensions && (
+          <div className="text-xs text-gray-400 text-center">
+            치수: {results.flat_design_dimensions.width_mm}mm × {results.flat_design_dimensions.height_mm}mm 
+            {results.flat_design_dimensions.scale && ` (${results.flat_design_dimensions.scale})`}
+          </div>
+        )}
       </div>
 
       <div className="pt-6 border-t border-white/10">
