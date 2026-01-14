@@ -27,6 +27,8 @@ function App() {
     textDirection: 'horizontal',
     fontSize: 100,
     originalFontSize: 100,
+    fontFamily: 'malgun',  // 기본: 맑은 고딕
+    fontWeight: '400',  // 기본: 일반 (400 = regular)
     textPositionX: 50,
     textPositionY: 50,
     orientation: 'auto',
@@ -179,6 +181,8 @@ function App() {
           text_color: sbForm.textColor,
           text_direction: sbForm.textDirection || 'horizontal',
           font_size: parseInt(sbForm.fontSize) || 100,
+          font_family: sbForm.fontFamily || 'malgun',
+          font_weight: sbForm.fontWeight || '400',
           text_position_x: parseInt(sbForm.textPositionX) || 50,
           text_position_y: parseInt(sbForm.textPositionY) || 50,
           logo_type: sbForm.logoType || 'channel',
@@ -730,6 +734,8 @@ function App() {
                             text_color: sbForm.textColor,
                             text_direction: sbForm.textDirection || 'horizontal',
                             font_size: parseInt(sbForm.fontSize) || 100,
+                            font_family: sbForm.fontFamily || 'malgun',
+                            font_weight: sbForm.fontWeight || '400',
                             text_position_x: parseInt(sbForm.textPositionX) || 50,
                             text_position_y: parseInt(sbForm.textPositionY) || 50,
                             logo_type: sbForm.logoType || 'channel',

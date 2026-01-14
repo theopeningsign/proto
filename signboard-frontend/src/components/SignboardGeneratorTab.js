@@ -21,6 +21,8 @@ const SignboardGeneratorTab = ({ savedBrandings }) => {
     textDirection: 'horizontal',
     fontSize: 100,
     originalFontSize: 100,
+    fontFamily: 'malgun',  // 기본: 맑은 고딕
+    fontWeight: '400',  // 기본: 일반 (400 = regular)
     textPositionX: 50,
     textPositionY: 50,
     orientation: 'auto',

@@ -136,42 +136,153 @@ def remove_white_background(image_bgr: np.ndarray, threshold: int = 240) -> np.n
     
     return image_rgba
 
-def get_korean_font(font_size: int):
-    """한글 폰트 찾기 - 여러 폰트 시도 (Windows/Linux 호환)"""
+def get_korean_font(font_size: int, font_family: str = "malgun", font_weight: str = "400"):
+    """한글 폰트 찾기 - 폰트 종류와 굵기를 지정 (Windows/Linux 호환)
+    
+    Args:
+        font_size: 폰트 크기
+        font_family: 폰트 종류 ("malgun", "nanumgothic", "nanumbarungothic", "gulim", "batang")
+        font_weight: 폰트 굵기 ("regular", "bold") 또는 숫자 ("100", "200", ..., "900")
+    """
     import platform
+    import os
     is_windows = platform.system() == "Windows"
     
+    # font_weight를 숫자로 변환 (100-900)
+    weight_num = 400  # 기본값: regular
+    if isinstance(font_weight, str):
+        if font_weight == "regular":
+            weight_num = 400
+        elif font_weight == "bold":
+            weight_num = 700
+        elif font_weight.isdigit():
+            weight_num = int(font_weight)
+            weight_num = max(100, min(900, weight_num))  # 100-900 범위로 제한
+    elif isinstance(font_weight, int):
+        weight_num = max(100, min(900, font_weight))
+    
+    # 굵기 범위를 regular/bold로 매핑
+    is_bold = weight_num >= 600
+    
     font_paths = []
+    
     if is_windows:
-        font_paths = [
-            "C:/Windows/Fonts/malgun.ttf",  # 맑은 고딕
-            "C:/Windows/Fonts/gulim.ttc",   # 굴림
-            "C:/Windows/Fonts/batang.ttc",  # 바탕
-            "C:/Windows/Fonts/NanumGothic.ttf",  # 나눔고딕
-            "C:/Windows/Fonts/NanumBarunGothic.ttf",  # 나눔바른고딕
-        ]
+        fonts_dir = "C:/Windows/Fonts"
+        
+        if font_family == "malgun":
+            # 맑은 고딕: 여러 볼드 파일명 시도
+            if is_bold:
+                font_paths = [
+                    f"{fonts_dir}/malgunbd.ttf",  # 맑은 고딕 Bold
+                    f"{fonts_dir}/malgunb.ttf",   # 대체 이름
+                    f"{fonts_dir}/malgun.ttf",    # 폴백: 일반 폰트
+                ]
+            else:
+                font_paths = [f"{fonts_dir}/malgun.ttf"]
+                
+        elif font_family == "nanumgothic":
+            if is_bold:
+                font_paths = [
+                    f"{fonts_dir}/NanumGothicBold.ttf",
+                    f"{fonts_dir}/NanumGothic.ttf",  # 폴백
+                ]
+            else:
+                font_paths = [f"{fonts_dir}/NanumGothic.ttf"]
+                
+        elif font_family == "nanumbarungothic":
+            if is_bold:
+                font_paths = [
+                    f"{fonts_dir}/NanumBarunGothicBold.ttf",
+                    f"{fonts_dir}/NanumBarunGothic.ttf",  # 폴백
+                ]
+            else:
+                font_paths = [f"{fonts_dir}/NanumBarunGothic.ttf"]
+                
+        elif font_family == "gulim":
+            # TTC 파일: 인덱스 0=일반, 1=볼드 (일부 시스템)
+            font_paths = [f"{fonts_dir}/gulim.ttc"]
+            
+        elif font_family == "batang":
+            font_paths = [f"{fonts_dir}/batang.ttc"]
+        else:
+            # 기본값: 맑은 고딕
+            if is_bold:
+                font_paths = [
+                    f"{fonts_dir}/malgunbd.ttf",
+                    f"{fonts_dir}/malgun.ttf",
+                ]
+            else:
+                font_paths = [f"{fonts_dir}/malgun.ttf"]
     else:
-        # Linux 경로
-        font_paths = [
-            "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
-            "/usr/share/fonts/truetype/nanum/NanumBarunGothic.ttf",
+        # Linux/macOS 경로
+        if font_family == "nanumgothic":
+            if is_bold:
+                font_paths = [
+                    "/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf",
+                    "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+                ]
+            else:
+                font_paths = [
+                    "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+                    "/usr/share/fonts/TTF/NanumGothic.ttf",
+                ]
+        elif font_family == "nanumbarungothic":
+            if is_bold:
+                font_paths = [
+                    "/usr/share/fonts/truetype/nanum/NanumBarunGothicBold.ttf",
+                    "/usr/share/fonts/truetype/nanum/NanumBarunGothic.ttf",
+                ]
+            else:
+                font_paths = ["/usr/share/fonts/truetype/nanum/NanumBarunGothic.ttf"]
+        else:
+            # 기본값: 나눔고딕
+            if is_bold:
+                font_paths = [
+                    "/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf",
+                    "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+                ]
+            else:
+                font_paths = [
+                    "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+                    "/usr/share/fonts/TTF/NanumGothic.ttf",
+                ]
+        
+        # 폴백 폰트들
+        font_paths.extend([
             "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
             "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-            "/usr/share/fonts/TTF/NanumGothic.ttf",
             "/System/Library/Fonts/AppleGothic.ttf",  # macOS
-        ]
+        ])
     
+    # 폰트 로드 시도
     for font_path in font_paths:
         try:
-            font = ImageFont.truetype(font_path, font_size)
-            # 폰트 테스트
-            test_img = Image.new('RGB', (100, 100))
-            test_draw = ImageDraw.Draw(test_img)
-            test_draw.text((0, 0), "테스트", font=font)
-            return font
-        except:
+            if os.path.exists(font_path):
+                # TTC 파일의 경우 인덱스 지정 시도
+                if font_path.endswith('.ttc'):
+                    try:
+                        # TTC 파일에서 볼드 인덱스 시도 (일부 시스템에서 1이 볼드)
+                        if is_bold:
+                            font = ImageFont.truetype(font_path, font_size, index=1)
+                        else:
+                            font = ImageFont.truetype(font_path, font_size, index=0)
+                    except:
+                        # 인덱스 지정 실패 시 기본 인덱스 사용
+                        font = ImageFont.truetype(font_path, font_size)
+                else:
+                    font = ImageFont.truetype(font_path, font_size)
+                
+                # 폰트 테스트
+                test_img = Image.new('RGB', (100, 100))
+                test_draw = ImageDraw.Draw(test_img)
+                test_draw.text((0, 0), "테스트", font=font)
+                return font
+        except Exception as e:
+            print(f"[DEBUG] 폰트 로드 실패: {font_path}, 오류: {e}")
             continue
     
+    # 모든 폰트 로드 실패 시 기본 폰트 반환
+    print(f"[WARNING] 폰트를 찾을 수 없음: family={font_family}, weight={font_weight}")
     return ImageFont.load_default()
 
 def hex_to_rgb(hex_color: str) -> tuple:
@@ -843,7 +954,7 @@ def render_scashi_signboard(text: str, bg_color: str, text_color: str, logo_img:
     
     return result
 
-def render_combined_signboard(installation_type: str, sign_type: str, text: str, bg_color: str, text_color: str, logo_img: Image.Image = None, logo_type: str = "channel", text_direction: str = "horizontal", font_size: int = 100, text_position_x: int = 50, text_position_y: int = 50, width: int = 1200, height: int = 300, use_actual_bg_for_training: bool = False, lights_enabled: bool = False, white_background: bool = False):
+def render_combined_signboard(installation_type: str, sign_type: str, text: str, bg_color: str, text_color: str, logo_img: Image.Image = None, logo_type: str = "channel", text_direction: str = "horizontal", font_size: int = 100, text_position_x: int = 50, text_position_y: int = 50, width: int = 1200, height: int = 300, use_actual_bg_for_training: bool = False, lights_enabled: bool = False, white_background: bool = False, building_photo: np.ndarray = None, polygon_points: list = None, font_family: str = "malgun", font_weight: str = "400"):
     """설치 방식 + 간판 종류 조합 렌더링
     Returns: (signboard_image, text_layer)
     - 전광채널: (signboard, text_layer) - text_layer는 텍스트만 분리
@@ -864,6 +975,11 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
     
     # 배경 생성 (설치 방식에 따라) - 프레임바는 텍스트 크기 측정 후에 그려야 함
     is_frame_bar = (installation_type == "프레임바")
+    is_window_sheet = (installation_type == "유리창시트시공")
+    
+    # 프레임 마스크 (유리창시트시공용, 텍스트 렌더링 시 적용)
+    window_frame_mask = None
+    window_background_before_text = None
     
     # 흰색 배경 강제 옵션
     if white_background:
@@ -907,6 +1023,92 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
         # 파사드: 사용자 지정 배경색 (깔끔한 외벽)
         bg_rgb = hex_to_rgb(bg_color) if bg_color.startswith('#') else (220, 220, 220)
         signboard = Image.new('RGB', (width, height), color=bg_rgb)
+    elif installation_type == "유리창시트시공":
+        # 유리창시트시공: 건물 사진에서 선택한 영역을 배경으로 사용
+        if building_photo is not None and polygon_points is not None:
+            # 건물 사진에서 폴리곤 영역을 추출
+            try:
+                if len(polygon_points) == 4:
+                    # 4점인 경우: 원근 변환
+                    src_points = order_points(polygon_points)
+                    dst_points = np.array([
+                        [0, 0],
+                        [width, 0],
+                        [width, height],
+                        [0, height]
+                    ], dtype=np.float32)
+                    M = cv2.getPerspectiveTransform(src_points.astype(np.float32), dst_points)
+                    warped_region = cv2.warpPerspective(building_photo, M, (width, height), flags=cv2.INTER_LINEAR)
+                else:
+                    # 4점이 아닌 경우: 바운딩 박스로 크롭 후 리사이즈
+                    xs = [p[0] for p in polygon_points]
+                    ys = [p[1] for p in polygon_points]
+                    min_x, max_x = int(min(xs)), int(max(xs))
+                    min_y, max_y = int(min(ys)), int(max(ys))
+                    bbox_w = max_x - min_x
+                    bbox_h = max_y - min_y
+                    if bbox_w > 0 and bbox_h > 0:
+                        cropped = building_photo[min_y:max_y, min_x:max_x]
+                        warped_region = cv2.resize(cropped, (width, height))
+                    else:
+                        # 폴백: 배경색 사용
+                        bg_rgb = hex_to_rgb(bg_color) if bg_color.startswith('#') else (220, 220, 220)
+                        warped_region = np.full((height, width, 3), bg_rgb, dtype=np.uint8)
+                
+                # 격자무늬(프레임) 감지: 어두운 부분은 시트지가 붙을 수 없으므로 원본 유지
+                # 건물 사진을 그레이스케일로 변환하여 밝기 기반으로 프레임 감지
+                warped_gray = cv2.cvtColor(warped_region, cv2.COLOR_BGR2GRAY)
+                
+                # 어두운 부분(프레임) 감지: 밝기 임계값 사용
+                # 유리창은 밝고, 프레임은 어둡다는 가정
+                # Otsu 임계값으로 자동 임계값 결정
+                _, frame_mask_binary = cv2.threshold(warped_gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+                
+                # 프레임 마스크 생성 (격자무늬가 있는 부분 = 0, 유리창 부분 = 1)
+                # 어두운 부분(프레임)을 확장하여 프레임 영역 확보
+                kernel_size = max(3, int(min(width, height) * 0.01))
+                kernel = np.ones((kernel_size, kernel_size), np.uint8)
+                frame_mask_binary = cv2.dilate(frame_mask_binary, kernel, iterations=2)
+                frame_mask_binary = cv2.erode(frame_mask_binary, kernel, iterations=1)
+                
+                # 프레임 마스크를 0~1 범위로 정규화 (프레임 부분 = 0, 유리창 부분 = 1)
+                frame_mask = (255 - frame_mask_binary).astype(np.float32) / 255.0
+                
+                # 텍스트 렌더링 시 사용할 프레임 마스크 저장
+                window_frame_mask = frame_mask.copy()
+                
+                # 시트지 색상(bg_color) 반영: 유리창 부분만 시트지 색상 블렌딩
+                bg_rgb = hex_to_rgb(bg_color) if bg_color.startswith('#') else (220, 220, 220)
+                sheet_color = np.full((height, width, 3), bg_rgb, dtype=np.float32)
+                
+                # 건물 사진 영역과 시트지 색상 블렌딩 (유리창 부분만)
+                warped_region_float = warped_region.astype(np.float32)
+                # BGR 순서를 RGB로 변환
+                warped_region_rgb_float = cv2.cvtColor(warped_region_float, cv2.COLOR_BGR2RGB)
+                
+                # 프레임 마스크를 3채널로 확장
+                frame_mask_3ch = np.stack([frame_mask, frame_mask, frame_mask], axis=2)
+                
+                # 프레임 부분은 원본 유지, 유리창 부분만 시트지 색상 블렌딩
+                # 건물 사진 40% + 시트지 색상 60% (유리창 부분만)
+                blended = warped_region_rgb_float * frame_mask_3ch * 0.4 + sheet_color * frame_mask_3ch * 0.6
+                # 프레임 부분은 원본 그대로
+                blended = blended + warped_region_rgb_float * (1 - frame_mask_3ch)
+                blended = np.clip(blended, 0, 255).astype(np.uint8)
+                
+                # 텍스트 렌더링 시 사용할 원본 배경 이미지 저장 (프레임 부분 복원용)
+                window_background_before_text = blended.copy()
+                
+                # PIL Image로 변환
+                signboard = Image.fromarray(blended)
+            except Exception as e:
+                print(f"[ERROR] 유리창시트시공 영역 추출 실패: {e}, 배경색 사용")
+                bg_rgb = hex_to_rgb(bg_color) if bg_color.startswith('#') else (220, 220, 220)
+                signboard = Image.new('RGB', (width, height), color=bg_rgb)
+        else:
+            # building_photo나 polygon_points가 없는 경우: 배경색 사용
+            bg_rgb = hex_to_rgb(bg_color) if bg_color.startswith('#') else (220, 220, 220)
+            signboard = Image.new('RGB', (width, height), color=bg_rgb)
     else:
         # 기본: 전면프레임
         bg_rgb = hex_to_rgb(bg_color) if bg_color.startswith('#') else (107, 45, 143)
@@ -932,8 +1134,12 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
     
     # 텍스트가 영역 안에 들어갈 때까지 폰트 크기 조정
     draw_temp = ImageDraw.Draw(Image.new('RGB', (width, height)))
+    # 유리창시트시공: 패딩 없이 높이에 딱 맞게
+    if is_window_sheet:
+        min_padding_x = 0
+        min_padding_y = 0
     # 프레임바인 경우 더 여유있게 (텍스트가 프레임바 안에 완전히 들어가야 함)
-    if is_frame_bar:
+    elif is_frame_bar:
         min_padding_x = int(width * 0.1)   # 좌우 여백 더 여유있게
         min_padding_y = int(height * 0.1)  # 상하 여백 더 여유있게
     else:
@@ -943,7 +1149,7 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
     max_text_height = height - (min_padding_y * 2)
     
     while current_font_size >= min_font_size:
-        font = get_korean_font(current_font_size)
+        font = get_korean_font(current_font_size, font_family, font_weight)
         
         if text_direction == "vertical":
             text_vertical = '\n'.join(list(text))
@@ -962,7 +1168,7 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
         current_font_size -= 2
         if current_font_size < min_font_size:
             current_font_size = min_font_size
-            font = get_korean_font(current_font_size)
+            font = get_korean_font(current_font_size, font_family, font_weight)
             if text_direction == "vertical":
                 text_vertical = '\n'.join(list(text))
                 bbox = draw_temp.multiline_textbbox((0, 0), text_vertical, font=font)
@@ -982,8 +1188,12 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
     text_pos_y_clamped = max(0, min(100, text_position_y))
 
     # 최소 패딩: 텍스트가 잘리지 않도록 약간의 여백
+    # 유리창시트시공: 패딩 없이 높이에 딱 맞게
+    if is_window_sheet:
+        min_padding_y = 0
+        min_padding_x = 0
     # 프레임바인 경우 더 여유있게 (텍스트가 프레임바 안에 들어가야 함)
-    if is_frame_bar:
+    elif is_frame_bar:
         min_padding_y = int(height * 0.1)  # 프레임바는 더 여유있게
         min_padding_x = int(width * 0.1)   # 좌우 여백도 더 여유있게
     else:
@@ -1554,7 +1764,11 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
         texture = np.random.randint(-3, 3, result_f.shape, dtype=np.int16).astype(np.float32)
         result_f = np.clip(result_f + texture, 0, 255).astype(np.uint8)
 
-        result = add_3d_depth(result_f, depth=5)
+        # 유리창시트시공: 입체감 없음 (유리창에 딱 붙는 시트지)
+        if not is_window_sheet:
+            result = add_3d_depth(result_f, depth=5)
+        else:
+            result = result_f
         return result, None
     
     elif sign_type == "플렉스_LED":
@@ -1571,7 +1785,9 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
             extra_glow = safe_gaussian_blur(result, (61, 61), 25)
             result = cv2.addWeighted(result, 0.8, extra_glow, 0.2, 0)
         
-        result = add_3d_depth(result, depth=6)
+        # 유리창시트시공: 입체감 없음 (유리창에 딱 붙는 시트지)
+        if not is_window_sheet:
+            result = add_3d_depth(result, depth=6)
         return result, None
     
     elif sign_type in ["플렉스_기본", "플렉스"]:
@@ -1588,7 +1804,9 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
             bright_glow = safe_gaussian_blur(result, (41, 41), 15)
             result = cv2.addWeighted(result, 0.9, bright_glow, 0.1, 0)
         
-        result = add_3d_depth(result, depth=6)
+        # 유리창시트시공: 입체감 없음 (유리창에 딱 붙는 시트지)
+        if not is_window_sheet:
+            result = add_3d_depth(result, depth=6)
         return result, None
     elif sign_type == "어닝간판":
         # 어닝간판: 전용 렌더러 사용 (비조명 간판)
@@ -1600,10 +1818,33 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
         draw = ImageDraw.Draw(signboard)
         draw.text(position, text_to_render, fill=text_rgb, font=font)
         result_np = cv2.cvtColor(np.array(signboard), cv2.COLOR_RGB2BGR)
-        result = add_3d_depth(result_np, depth=6)
+        
+        # 유리창시트시공: 프레임 마스크 적용하여 격자무늬 부분의 텍스트 제거
+        if is_window_sheet and window_frame_mask is not None and window_background_before_text is not None:
+            # 텍스트가 그려진 이미지를 RGB로 변환 (프레임 마스크와 블렌딩하기 위해)
+            result_rgb = cv2.cvtColor(result_np, cv2.COLOR_BGR2RGB).astype(np.float32)
+            
+            # 프레임 마스크를 3채널로 확장 (프레임 부분 = 0, 유리창 부분 = 1)
+            frame_mask_3ch = np.stack([window_frame_mask, window_frame_mask, window_frame_mask], axis=2)
+            
+            # 원본 배경 이미지(RGB)를 float32로 변환
+            background_rgb = window_background_before_text.astype(np.float32)
+            
+            # 프레임 부분(마스크 = 0)에서는 원본 배경 이미지를 사용하고, 유리창 부분(마스크 = 1)에서는 텍스트가 그려진 이미지를 사용
+            result_rgb = background_rgb * (1 - frame_mask_3ch) + result_rgb * frame_mask_3ch
+            result_rgb = np.clip(result_rgb, 0, 255).astype(np.uint8)
+            
+            # RGB를 BGR로 변환
+            result_np = cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR)
+        
+        # 유리창시트시공: 입체감 없음 (유리창에 딱 붙는 시트지)
+        if not is_window_sheet:
+            result = add_3d_depth(result_np, depth=6)
+        else:
+            result = result_np
         return result, None
 
-def render_signboard(text: str, logo_path: str, logo_type: str, installation_type: str, sign_type: str, bg_color: str, text_color: str, text_direction: str = "horizontal", font_size: int = 100, text_position_x: int = 50, text_position_y: int = 50, width: int = 1200, height: int = 300, use_actual_bg_for_training: bool = False, lights_enabled: bool = False, white_background: bool = False) -> tuple:
+def render_signboard(text: str, logo_path: str, logo_type: str, installation_type: str, sign_type: str, bg_color: str, text_color: str, text_direction: str = "horizontal", font_size: int = 100, text_position_x: int = 50, text_position_y: int = 50, width: int = 1200, height: int = 300, use_actual_bg_for_training: bool = False, lights_enabled: bool = False, white_background: bool = False, building_photo: np.ndarray = None, polygon_points: list = None, font_family: str = "malgun", font_weight: str = "400") -> tuple:
     """간판 이미지 생성 - 설치 방식 + 간판 종류
     Returns: (day_image, text_layer) - text_layer는 전광채널만 분리, 나머지는 None
     
@@ -1624,28 +1865,32 @@ def render_signboard(text: str, logo_path: str, logo_type: str, installation_typ
     # 야간 합성에서만 전광/후광 차이를 둔다.
     if sign_type == "전광채널":
         # 전광채널: 직접 처리 (주간은 그림자+옆면+앞면, 야간은 별도 처리)
-        result, text_layer = render_combined_signboard(installation_type, "전광채널", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height, use_actual_bg_for_training, lights_enabled, white_background)
+        result, text_layer = render_combined_signboard(installation_type, "전광채널", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height, use_actual_bg_for_training, lights_enabled, white_background, building_photo, polygon_points, font_family, font_weight)
         return result, text_layer
     elif sign_type == "후광채널":
-        result, text_layer = render_combined_signboard(installation_type, "후광채널", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height, use_actual_bg_for_training, lights_enabled, white_background)
+        result, text_layer = render_combined_signboard(installation_type, "후광채널", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height, use_actual_bg_for_training, lights_enabled, white_background, building_photo, polygon_points, font_family, font_weight)
         return result, text_layer
     elif sign_type == "전후광채널":
-        result, text_layer = render_combined_signboard(installation_type, "전후광채널", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height, use_actual_bg_for_training, lights_enabled, white_background)
+        result, text_layer = render_combined_signboard(installation_type, "전후광채널", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height, use_actual_bg_for_training, lights_enabled, white_background, building_photo, polygon_points, font_family, font_weight)
         return result, text_layer
     elif sign_type.startswith("스카시"):
         # 스카시_금속, 스카시_아크릴 등 모든 스카시 변형 지원
         print(f"[DEBUG] render_signboard: 스카시 감지, sign_type={sign_type}, render_combined_signboard 호출")
-        result, _ = render_combined_signboard(installation_type, sign_type, text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height, use_actual_bg_for_training, lights_enabled, white_background)
+        result, _ = render_combined_signboard(installation_type, sign_type, text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height, use_actual_bg_for_training, lights_enabled, white_background, building_photo, polygon_points, font_family, font_weight)
         return result, None
     elif sign_type == "플렉스":
-        result, _ = render_combined_signboard(installation_type, "플렉스", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height, use_actual_bg_for_training, lights_enabled, white_background)
+        result, _ = render_combined_signboard(installation_type, "플렉스", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height, use_actual_bg_for_training, lights_enabled, white_background, building_photo, polygon_points, font_family, font_weight)
         return result, None
     elif sign_type == "어닝간판":
-        result, _ = render_combined_signboard(installation_type, "어닝간판", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height, use_actual_bg_for_training, lights_enabled, white_background)
+        result, _ = render_combined_signboard(installation_type, "어닝간판", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height, use_actual_bg_for_training, lights_enabled, white_background, building_photo, polygon_points, font_family, font_weight)
+        return result, None
+    elif sign_type == "시트시공":
+        # 시트시공: 유리창에 시트지 부착 (유리창시트시공 설치 방식과 함께 사용)
+        result, _ = render_combined_signboard(installation_type, "시트시공", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height, use_actual_bg_for_training, lights_enabled, white_background, building_photo, polygon_points, font_family, font_weight)
         return result, None
     else:
         # 기본값: 전광채널
-        result, text_layer = render_combined_signboard(installation_type, "전광채널", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height, use_actual_bg_for_training, lights_enabled, white_background)
+        result, text_layer = render_combined_signboard(installation_type, "전광채널", text, bg_color, text_color, logo_img, logo_type, text_direction, font_size, text_position_x, text_position_y, width, height, use_actual_bg_for_training, lights_enabled, white_background, building_photo, polygon_points, font_family, font_weight)
         return result, text_layer
 
 def order_points(pts):
@@ -2931,6 +3176,10 @@ def composite_signboard(
             # 비조명: 야간에는 전체를 어둡게(배경과 동일 수준)
             glow_intensity = 0.3
             night_result = night_base * (1 - combined_mask) + warped_sign.astype(np.float32) * combined_mask * glow_intensity
+        elif sign_type == "시트시공" or installation_type == "유리창시트시공":
+            # 시트시공: 비조명 간판이므로 야간에 어두워짐
+            glow_intensity = 0.3
+            night_result = night_base * (1 - combined_mask) + warped_sign.astype(np.float32) * combined_mask * glow_intensity
         else:
             glow_intensity = 1.8
             night_result = night_base * (1 - combined_mask) + warped_sign.astype(np.float32) * combined_mask * glow_intensity
@@ -3104,6 +3353,8 @@ async def generate_simulation(
     text_color: str = Form(...),
     text_direction: str = Form("horizontal"),
     font_size: int = Form(100),
+    font_family: str = Form("malgun"),
+    font_weight: str = Form("400"),
     text_position_x: int = Form(50),
     text_position_y: int = Form(50),
     orientation: str = Form("auto"),
@@ -3171,6 +3422,8 @@ async def generate_simulation(
                     sb_text_color = sb.get("text_color", text_color)
                     sb_text_direction = sb.get("text_direction", text_direction)
                     sb_font_size = int(sb.get("font_size", font_size))
+                    sb_font_family = sb.get("font_family", font_family)
+                    sb_font_weight = sb.get("font_weight", font_weight)
                     sb_text_position_x = int(sb.get("text_position_x", text_position_x))
                     sb_text_position_y = int(sb.get("text_position_y", text_position_y))
                     sb_orientation = sb.get("orientation", orientation)
@@ -3212,12 +3465,22 @@ async def generate_simulation(
                     auto_direction = analyze_polygon_shape(points)
                     final_direction = auto_direction if sb_text_direction == "auto" else sb_text_direction
 
-                    auto_font_size = int(region_height * 0.6)
-                    auto_font_size = max(30, min(auto_font_size, int(region_height * 0.9)))
+                    # ===== 복수 간판용 자동 글자 크기 (단일 간판 로직과 동일) =====
+                    if sb_installation_type == "유리창시트시공":
+                        base_ratio = 0.9
+                    elif sb_installation_type == "프레임바":
+                        base_ratio = 0.7
+                    else:
+                        base_ratio = 0.85
 
+                    auto_font_size = int(region_height * base_ratio)
+                    auto_font_size = max(20, min(auto_font_size, int(region_height * 0.98)))
+
+                    # 슬라이더를 배율(%)로 사용
                     if sb_font_size != 100:
-                        scale_factor = region_height / 300
-                        final_font_size = int(sb_font_size * scale_factor)
+                        scale_factor = sb_font_size / 100.0
+                        scale_factor = max(0.3, min(3.0, scale_factor))
+                        final_font_size = int(auto_font_size * scale_factor)
                     else:
                         final_font_size = auto_font_size
 
@@ -3269,7 +3532,9 @@ async def generate_simulation(
                         signboard_img, text_layer = render_signboard(
                             sb_text, sb_logo, sb_logo_type, sb_installation_type, sb_sign_type,
                             sb_bg_color, sb_text_color, final_direction, final_font_size,
-                            sb_text_position_x, sb_text_position_y, region_width, region_height
+                            sb_text_position_x, sb_text_position_y, region_width, region_height,
+                            building_photo=building_img, polygon_points=points,
+                            font_family=sb_font_family, font_weight=sb_font_weight
                         )
 
                         from PIL import Image, ImageDraw, ImageFont
@@ -3411,16 +3676,28 @@ async def generate_simulation(
         auto_direction = analyze_polygon_shape(points)
         final_direction = auto_direction if text_direction == "auto" else text_direction
         
-        # 폰트 크기 자동 계산 (영역 높이에 비례, 사용자 설정 반영)
-        # 기본: 높이의 60%, 최소 30px, 최대 영역 높이의 90%
-        auto_font_size = int(region_height * 0.6)
-        auto_font_size = max(30, min(auto_font_size, int(region_height * 0.9)))
+        # ===== 글자 자동 크기 계산 (영역을 최대한 가득 채우기) =====
+        # 설치 방식에 따라 기본으로 채우는 정도만 다르게 설정
+        # - 유리창시트시공: 거의 가득 (0.9)
+        # - 프레임바: 막대 안에 여유를 조금 두고 (0.7)
+        # - 그 외 대부분: 꽉 차게 (0.85)
+        if installation_type == "유리창시트시공":
+            base_ratio = 0.9
+        elif installation_type == "프레임바":
+            base_ratio = 0.7
+        else:
+            base_ratio = 0.85
+
+        auto_font_size = int(region_height * base_ratio)
+        # 최소/최대 가드
+        auto_font_size = max(20, min(auto_font_size, int(region_height * 0.98)))
         
-        # 사용자가 기본값(100)이 아닌 값을 설정했으면 그걸 우선 사용
+        # ===== 슬라이더 font_size를 "배율(%)"로 해석 =====
+        # 100 → 기본, 50 → 0.5배, 200 → 2배
         if font_size != 100:
-            # 사용자 설정값을 영역 크기에 맞게 스케일링
-            scale_factor = region_height / 300  # 기본 높이 300 기준
-            final_font_size = int(font_size * scale_factor)
+            scale_factor = font_size / 100.0
+            scale_factor = max(0.3, min(3.0, scale_factor))  # 30%~300% 범위 제한
+            final_font_size = int(auto_font_size * scale_factor)
         else:
             final_font_size = auto_font_size
         
@@ -3487,7 +3764,9 @@ async def generate_simulation(
             signboard_img, text_layer = render_signboard(
                 text, logo, logo_type, installation_type, sign_type, 
                 bg_color, text_color, final_direction, final_font_size, 
-                text_position_x, text_position_y, region_width, region_height
+                text_position_x, text_position_y, region_width, region_height,
+                building_photo=building_img, polygon_points=points,
+                font_family=font_family, font_weight=font_weight
             )
             
             # 실제 텍스트 크기 계산 (render_combined_signboard 내부에서 계산된 값 사용)
@@ -3696,7 +3975,8 @@ async def generate_hq(
                 bg_color, text_color, text_direction, font_size,
                 text_position_x, text_position_y, region_width, region_height,
                 use_actual_bg_for_training=True,  # True로 변경: 학습과 동일한 형태
-                lights_enabled=(lights_enabled.lower() == "true")
+                lights_enabled=(lights_enabled.lower() == "true"),
+                building_photo=building_img, polygon_points=points
             )
         
         # 3. pix2pix로 개선 (원본 크기 그대로)
@@ -3828,7 +4108,8 @@ async def generate_flat_design_api(
                 text_position_x, text_position_y, region_width, region_height,
                 use_actual_bg_for_training=False,
                 lights_enabled=(lights_enabled.lower() == "true"),
-                white_background=True  # 흰색 배경 강제
+                white_background=True,  # 흰색 배경 강제
+                building_photo=building_img, polygon_points=points
             )
             # text_layer가 BGR 형식이면 RGBA로 변환 필요
             if text_layer is not None:

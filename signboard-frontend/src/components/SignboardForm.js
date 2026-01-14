@@ -3,10 +3,17 @@ import React, { useState } from 'react';
 const SignboardForm = ({ formData, onFormDataChange, section = 'full' }) => {
 
   const handleChange = (field, value) => {
-    onFormDataChange({
+    const newFormData = {
       ...formData,
       [field]: value
-    });
+    };
+    
+    // 설치 방식이 "유리창시트시공"으로 변경되면 간판 종류를 "시트시공"으로 자동 설정
+    if (field === 'installationType' && value === '유리창시트시공') {
+      newFormData.signType = '시트시공';
+    }
+    
+    onFormDataChange(newFormData);
   };
 
   const handleLogoUpload = (e) => {
@@ -211,6 +218,7 @@ const SignboardForm = ({ formData, onFormDataChange, section = 'full' }) => {
             <option value="프레임바" className="bg-gray-800">프레임바 (바 위에 부착)</option>
             <option value="전면프레임" className="bg-gray-800">전면프레임 (프레임 위 부착)</option>
             <option value="파사드" className="bg-gray-800">파사드 (외벽 전체)</option>
+            <option value="유리창시트시공" className="bg-gray-800">유리창시트시공 (유리창에 시트지 부착)</option>
           </select>
         </div>
 
@@ -220,9 +228,12 @@ const SignboardForm = ({ formData, onFormDataChange, section = 'full' }) => {
             간판 종류 *
           </label>
           <select
-            value={formData.signType}
+            value={formData.installationType === '유리창시트시공' ? '시트시공' : formData.signType}
             onChange={(e) => handleChange('signType', e.target.value)}
-            className="w-full bg-white/5 border border-white/20 rounded-lg px-4 py-3 text-white focus:border-blue-500 focus:outline-none transition-colors"
+            disabled={formData.installationType === '유리창시트시공'}
+            className={`w-full bg-white/5 border border-white/20 rounded-lg px-4 py-3 text-white focus:border-blue-500 focus:outline-none transition-colors ${
+              formData.installationType === '유리창시트시공' ? 'opacity-50 cursor-not-allowed' : ''
+            }`}
           >
             <option value="전광채널" className="bg-gray-800">전광채널 (앞면 발광)</option>
             <option value="후광채널" className="bg-gray-800">후광채널 (뒷면 발광)</option>
@@ -231,7 +242,13 @@ const SignboardForm = ({ formData, onFormDataChange, section = 'full' }) => {
             <option value="플렉스_LED" className="bg-gray-800">플렉스 LED (LED 백라이트)</option>
             <option value="플렉스_기본" className="bg-gray-800">플렉스 기본 (천 재질)</option>
             <option value="어닝간판" className="bg-gray-800">어닝간판 (천막형)</option>
+            <option value="시트시공" className="bg-gray-800">시트시공 (유리창 시트지 부착)</option>
           </select>
+          {formData.installationType === '유리창시트시공' && (
+            <p className="mt-1 text-xs text-gray-400">
+              유리창시트시공은 시트시공으로 고정됩니다
+            </p>
+          )}
         </div>
         </>
         )}
@@ -344,6 +361,93 @@ const SignboardForm = ({ formData, onFormDataChange, section = 'full' }) => {
               세로쓰기
             </button>
           </div>
+        </div>
+
+        {/* 글자체 */}
+        <div>
+          <label className="block text-sm font-medium text-gray-300 mb-2">
+            글자체
+          </label>
+          <select
+            value={formData.fontFamily || 'malgun'}
+            onChange={(e) => handleChange('fontFamily', e.target.value)}
+            className="w-full bg-white/5 border border-white/20 rounded-lg px-4 py-3 text-white focus:border-blue-500 focus:outline-none transition-colors"
+          >
+            <option value="malgun" className="bg-gray-800">맑은 고딕</option>
+            <option value="nanumgothic" className="bg-gray-800">나눔고딕</option>
+            <option value="nanumbarungothic" className="bg-gray-800">나눔바른고딕</option>
+            <option value="gulim" className="bg-gray-800">굴림</option>
+            <option value="batang" className="bg-gray-800">바탕</option>
+          </select>
+        </div>
+
+        {/* 글자 굵기 */}
+        <div>
+          <label className="block text-sm font-medium text-gray-300 mb-2">
+            글자 굵기
+          </label>
+          <div className="flex gap-3 items-center">
+            <select
+              value={formData.fontWeight || '400'}
+              onChange={(e) => handleChange('fontWeight', e.target.value)}
+              className="flex-1 bg-white/5 border border-white/20 rounded-lg px-4 py-3 text-white focus:border-blue-500 focus:outline-none transition-colors"
+            >
+              <option value="100" className="bg-gray-800">100 - 얇게</option>
+              <option value="200" className="bg-gray-800">200 - 매우 가늘게</option>
+              <option value="300" className="bg-gray-800">300 - 가늘게</option>
+              <option value="400" className="bg-gray-800">400 - 일반</option>
+              <option value="500" className="bg-gray-800">500 - 중간</option>
+              <option value="600" className="bg-gray-800">600 - 중간 굵게</option>
+              <option value="700" className="bg-gray-800">700 - 굵게</option>
+              <option value="800" className="bg-gray-800">800 - 매우 굵게</option>
+              <option value="900" className="bg-gray-800">900 - 가장 굵게</option>
+            </select>
+            {/* 시각적 표시 */}
+            <div className="text-xs text-gray-400 min-w-[80px] text-center">
+              {formData.fontWeight === '100' && '얇게'}
+              {formData.fontWeight === '200' && '매우 가늘게'}
+              {formData.fontWeight === '300' && '가늘게'}
+              {formData.fontWeight === '400' && '일반'}
+              {formData.fontWeight === '500' && '중간'}
+              {formData.fontWeight === '600' && '중간 굵게'}
+              {formData.fontWeight === '700' && '굵게'}
+              {formData.fontWeight === '800' && '매우 굵게'}
+              {formData.fontWeight === '900' && '가장 굵게'}
+            </div>
+          </div>
+        </div>
+
+        {/* 글자 크기 */}
+        <div>
+          <label className="block text-sm font-medium text-gray-300 mb-2">
+            글자 크기 (상대값)
+          </label>
+          <div className="flex items-center gap-4">
+            <input
+              type="range"
+              min="50"
+              max="200"
+              step="5"
+              value={formData.fontSize || 100}
+              onChange={(e) => handleChange('fontSize', parseInt(e.target.value, 10))}
+              className="flex-1 accent-blue-500"
+            />
+            <input
+              type="number"
+              min="50"
+              max="200"
+              step="5"
+              value={formData.fontSize || 100}
+              onChange={(e) => handleChange('fontSize', parseInt(e.target.value, 10) || 100)}
+              className="w-20 bg-transparent border border-white/20 rounded-lg px-2 py-2 text-white text-sm focus:border-blue-500 focus:outline-none"
+            />
+            <span className="text-xs text-gray-400 w-20 text-right">
+              {(formData.fontSize || 100)}%
+            </span>
+          </div>
+          <p className="mt-1 text-xs text-gray-500">
+            100 = 기본, 50 = 절반 크기, 150 = 1.5배 크기
+          </p>
         </div>
 
         {/* 간판 방향 (가로/세로) */}
