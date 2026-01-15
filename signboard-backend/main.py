@@ -1265,8 +1265,8 @@ def render_combined_signboard(installation_type: str, sign_type: str, text: str,
         text_actual_right = actual_bbox[2]
         text_actual_width = text_actual_right - text_actual_left
         
-        # 양옆으로 튀어나올 길이 (텍스트 너비의 10-15% 또는 최소 20px)
-        bar_padding = max(20, int(text_actual_width * 0.12))
+        # 양옆으로 튀어나올 길이 (텍스트 너비의 1% 또는 최소 2px)
+        bar_padding = max(2, int(text_actual_width * 0.01))
         bar_left = max(0, text_actual_left - bar_padding)
         bar_right = min(width, text_actual_right + bar_padding)
         bar_width = bar_right - bar_left
