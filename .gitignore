@@ -33,9 +33,14 @@ yarn-error.log*
 # Environment
 .env
 .env.local
+signboard-backend/token.json
+signboard-backend/credentials.json
 .env.development.local
 .env.test.local
 .env.production.local
+
+# Pix2Pix 체크포인트 (Google Drive로 별도 배포)
+signboard-backend/checkpoints/
 
 # Phase 2 학습 데이터 (이미지 파일은 제외)
 signboard-backend/phase2_data/real_photos/
